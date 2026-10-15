@@ -1,6 +1,7 @@
 import { GraphQLError } from 'graphql';
 import { createSchema } from 'graphql-yoga';
 import { HerdrError } from './socket.js';
+import type { DiscoveredMachine } from './discovery.js';
 
 export type RequestHerdr = (
   method: string,
@@ -43,7 +44,10 @@ const keysAllowed = new Set([
 ]);
 const field = (key: string) => (parent: RecordValue) => parent[key];
 
-export function buildSchema(request: RequestHerdr) {
+export function buildSchema(
+  request: RequestHerdr,
+  discover?: () => Promise<DiscoveredMachine[]>,
+) {
   async function call(
     method: string,
     params?: RecordValue,
@@ -113,7 +117,17 @@ export function buildSchema(request: RequestHerdr) {
       type ActionResult {
         ok: Boolean!
       }
+      type DiscoveredMachine {
+        id: ID!
+        name: String!
+        dnsName: String
+        os: String
+        addresses: [String!]!
+        online: Boolean!
+        self: Boolean!
+      }
       type Query {
+        discoveredMachines: [DiscoveredMachine!]!
         session: Session!
         output(
           target: ID!
@@ -135,6 +149,23 @@ export function buildSchema(request: RequestHerdr) {
     `,
     resolvers: {
       Query: {
+        discoveredMachines: async () => {
+          if (!discover)
+            throw new GraphQLError(
+              'Discovery is not available on this bridge. Update and restart it, or add a machine manually.',
+              { extensions: { code: 'TAILSCALE_UNAVAILABLE' } },
+            );
+          try {
+            return await discover();
+          } catch (error) {
+            throw new GraphQLError(
+              error instanceof HerdrError
+                ? error.message
+                : 'Could not discover devices. Check Tailscale on this computer, or add a machine manually.',
+              { extensions: { code: 'TAILSCALE_UNAVAILABLE' } },
+            );
+          }
+        },
         session: async () => {
           const result = await call('session.snapshot');
           return result.snapshot;

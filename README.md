@@ -1,6 +1,6 @@
 # Herdr Mobile
 
-An Expo Android companion for [Herdr](https://github.com/herdrdev/herdr). Check agent status, read terminal output, send prompts, respond to approval screens with terminal keys, and start agents in existing available panes.
+An Expo Android companion for [Herdr](https://github.com/herdrdev/herdr). Check agent status, read terminal output, send prompts, respond to approval screens with terminal keys, and start agents in existing available panes. Discover Tailscale devices and save multiple independently paired machines.
 
 See [screenshots and verification](docs/verification.md) for the built APK and native app checks.
 
@@ -36,6 +36,24 @@ npm run pairing -w bridge
 Use the bridge URL printed by the pairing command (`http://<your-tailscale-ip>:8787`); verify your address with `tailscale ip -4`. The pairing command prints the token locally. Do not share it: it authorizes control of this Herdr session. Token generation is automatic; `.local/pairing-token` is ignored and restricted to its owner. The app saves credentials in Expo SecureStore.
 
 Open Herdr on Android, enter that address and token, then tap **Connect to Herdr**. Neither an Expo account nor a public hosting service is required to use a locally built APK.
+
+## Discover and add other machines
+
+1. Pair your first computer manually using the steps above.
+2. Tap the machine name below the Herdr header, or **Settings → Manage machines**.
+3. Tap **Discover devices** to list the Tailscale peers visible to that connected computer. Names, OS, private addresses and online status come from its local Tailscale inventory.
+4. Tap **Add <device>**. The app prefills its address (port 8787); enter a display name and the pairing token from that computer's bridge, then tap **Verify and add machine**.
+5. Use the **Your machines** screen to switch between saved profiles or remove one. You can also **Add manually**, including when the current bridge is offline.
+
+Every computer needs its own running Herdr server and Herdr Mobile bridge. Copy this checkout to that machine, install/build/start its bridge, and run `npm run pairing -w bridge` there to get its token. Discovery lists devices; it does not install software remotely. A device being online in Tailscale does not prove that it has a bridge or that your phone can reach it. Tailnet ACLs/firewalls must allow phone → computer TCP 8787.
+
+On each computer, check `herdr status server` for the socket path. Set `HERDR_SOCKET_PATH` in its bridge configuration if the platform or named session uses a different path from the default.
+
+Discovery runs the local `tailscale status --json` command on the paired bridge, not a phone subnet scan. It needs no Tailscale admin API key and returns no users, keys, public endpoints or traffic statistics. Results are cached for up to 10 seconds. If discovery says the bridge needs updating, rebuild/restart that bridge; manual pairing remains available.
+
+Machine tokens are stored separately in Expo SecureStore; up to 20 profiles are supported. Upgrading from 0.1.0 migrates the existing pairing automatically. Saving the same normalized bridge address updates its profile. Different addresses or DNS aliases are separate profiles, even if they refer to one computer.
+
+Selecting a machine resets its agent list/output, and pane IDs are always scoped to that profile. Removing a profile leaves its agents running; removing the active profile selects another saved machine or returns to initial pairing. It does not revoke the bridge token on the computer.
 
 Optional configuration goes in `bridge/.env` (copy from `bridge/.env.example`). For localhost testing set `HERDR_MOBILE_HOST=127.0.0.1`. For a named session set `HERDR_SOCKET_PATH` to its socket path. Defaults point to the installed user's `~/.config/herdr/herdr.sock`. Token rotation: stop the bridge, delete `.local/pairing-token`, restart, and re-pair the app. Explicit environment tokens must be at least 32 characters.
 
@@ -74,7 +92,7 @@ Native projects are generated from `mobile/app.json`. Do not edit generated Andr
 - **Other terminals:** inspect a shell or unrecognized process. **Start an agent here** launches an installed agent CLI in that explicit pane; Herdr verifies availability. Enter a unique lowercase agent name and a Herdr agent kind.
 - Foreground state/output refresh approximately every 3/1.5 seconds, with bounded backoff on failures. Background polling pauses. No push/background notifications in this version.
 - A disconnected mutation is never retried automatically. If delivery is uncertain, inspect refreshed output before sending it again. Failed sends retain your draft.
-- **Settings → Forget connection** removes saved credentials from the phone.
+- **Settings → Forget connection** removes the active saved profile. **Manage machines** offers confirmed removal and switching; other saved profiles remain available.
 
 ## Keep the bridge running
 

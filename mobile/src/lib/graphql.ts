@@ -75,6 +75,19 @@ export const OUTPUT = gql`
     }
   }
 `;
+export const DISCOVER_MACHINES = gql`
+  query DiscoverMachines {
+    discoveredMachines {
+      id
+      name
+      dnsName
+      os
+      addresses
+      online
+      self
+    }
+  }
+`;
 export const PROMPT = gql`
   mutation Prompt($target: ID!, $text: String!) {
     prompt(target: $target, text: $text) {

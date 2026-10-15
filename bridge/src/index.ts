@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import { loadConfig } from './config.js';
 import { createBridge } from './server.js';
 import { HerdrClient } from './socket.js';
+import { createDiscovery } from './discovery.js';
 
 const config = loadConfig();
 if (process.argv.includes('--pairing')) {
@@ -14,6 +15,7 @@ if (process.argv.includes('--pairing')) {
   const app = createBridge({
     token: config.token,
     request: client.request.bind(client),
+    discover: createDiscovery(),
   });
   const server = createServer(
     { maxHeaderSize: 8192, requestTimeout: 15000, headersTimeout: 10000 },

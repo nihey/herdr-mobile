@@ -5,6 +5,9 @@ npm workspaces: `mobile/` is an Expo 57 / React Native / TypeScript Android app;
 - All app data operations use Apollo Client 4 and explicit GraphQL schema/resolvers. No REST data endpoints or generic Herdr method passthrough.
 - Use opaque Herdr workspace/tab/pane IDs. Never use an implicitly focused target for mutations.
 - Native app credentials live in Expo SecureStore. Bridge token is generated locally in ignored `.local/`, mode 0600. Never commit or log credentials, terminal output, or prompts.
+- Saved machines use a small v2 SecureStore index and separate immutable per-profile credential records. The index write commits a change; failed writes preserve the previous profile. Existing v1 pairing migrates on upgrade. Profiles deduplicate by normalized bridge origin (maximum 20).
+- Tailscale discovery is an authenticated GraphQL query backed by a bounded local `tailscale status --json` call. Return only peer identity/name, tailnet addresses, OS and online/self flags. No remote probing or installation.
+- Machine changes stop the previous Apollo client and reset host-specific UI. Agent routes require the active machine ID as well as the pane ID; never resolve a route from another host.
 - Default network binding is the Tailscale IPv4, not 0.0.0.0. Local HTTP is for the encrypted tailnet. Use HTTPS if exposed through a TLS endpoint.
 - No automatic mutation retries. A failed connection after submission means uncertain delivery.
 - Do not test by sending prompts or keys to existing user agents. Use a disposable named Herdr session or a mock socket.

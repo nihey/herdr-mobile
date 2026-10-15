@@ -29,3 +29,12 @@ export type Session = {
   panes: Pane[];
 };
 export type Output = { text: string; fetchedAt: string };
+export type DiscoveredMachine = {
+  id: string;
+  name: string;
+  dnsName: string | null;
+  os: string | null;
+  addresses: string[];
+  online: boolean;
+  self: boolean;
+};

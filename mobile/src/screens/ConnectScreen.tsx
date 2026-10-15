@@ -12,7 +12,7 @@ import { errorMessage } from '@/lib/errors';
 import { Button, c, Field, Notice, s, Screen } from '@/components/ui';
 
 export function ConnectScreen() {
-  const { connect } = useSession();
+  const { connect, storageError, reload } = useSession();
   const [url, setUrl] = useState('');
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
@@ -83,6 +83,22 @@ export function ConnectScreen() {
             editable={!busy}
             autoComplete="off"
           />
+          {storageError && (
+            <>
+              <Notice message={storageError} danger />
+              <Button
+                title="Retry saved machines"
+                variant="secondary"
+                onPress={() => {
+                  void reload().catch(() =>
+                    setError(
+                      'Secure storage is still unavailable. Please try again.',
+                    ),
+                  );
+                }}
+              />
+            </>
+          )}
           <Field
             label="Pairing token"
             placeholder="Paste the token from your computer"

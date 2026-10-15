@@ -38,7 +38,7 @@ import {
 import { StartAgentModal } from './StartAgentModal';
 
 export function AgentsScreen() {
-  const { connection, forget } = useSession();
+  const { connection, activeMachine, forget, busy } = useSession();
   const { data, error, loading, refresh } = useSnapshot();
   const [search, setSearch] = useState('');
   const [workspace, setWorkspace] = useState<string | null>(null);
@@ -93,7 +93,12 @@ export function AgentsScreen() {
             <Settings2 size={20} color={c.muted} />
           </IconButton>
         </View>
-        <View style={[s.row, { gap: 7 }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Manage machines"
+          onPress={() => router.push('/machines')}
+          style={[s.row, { gap: 7, minHeight: 44 }]}
+        >
           <View
             style={{
               width: 6,
@@ -106,10 +111,11 @@ export function AgentsScreen() {
             numberOfLines={1}
             style={[s.muted, { fontFamily: mono, fontSize: 11, flex: 1 }]}
           >
-            {connection?.url.replace(/^https?:\/\//, '')} ·{' '}
-            {connected ? 'connected' : loading ? 'connecting' : 'offline'}
+            {activeMachine?.name ?? connection?.url.replace(/^https?:\/\//, '')}{' '}
+            · {connected ? 'connected' : loading ? 'connecting' : 'offline'}
           </Text>
-        </View>
+          <ChevronRight size={16} color={c.muted} />
+        </Pressable>
         <View style={[s.between, { marginTop: 3 }]}>
           <View style={{ gap: 4 }}>
             <Text style={s.eyebrow}>MISSION CONTROL</Text>
@@ -231,7 +237,10 @@ export function AgentsScreen() {
                 onPress={() =>
                   router.push({
                     pathname: '/agent/[paneId]',
-                    params: { paneId: agent.paneId },
+                    params: {
+                      paneId: agent.paneId,
+                      machineId: activeMachine?.id,
+                    },
                   })
                 }
                 style={({ pressed }) => [
@@ -332,7 +341,11 @@ export function AgentsScreen() {
                       onPress={() =>
                         router.push({
                           pathname: '/agent/[paneId]',
-                          params: { paneId: pane.id, raw: '1' },
+                          params: {
+                            paneId: pane.id,
+                            raw: '1',
+                            machineId: activeMachine?.id,
+                          },
                         })
                       }
                       style={s.between}
@@ -395,10 +408,19 @@ export function AgentsScreen() {
           Herdr {data?.version ?? '—'} · protocol {data?.protocol ?? '—'}
         </Text>
         <Notice message="The bridge can control this Herdr session. Keep your pairing token private and keep both devices on your trusted tailnet." />
+        <Button
+          title="Manage machines"
+          variant="secondary"
+          onPress={() => {
+            setSettings(false);
+            router.push('/machines');
+          }}
+        />
         {!!forgetError && <Notice message={forgetError} danger />}
         <Button
           title="Forget connection"
           variant="danger"
+          disabled={busy}
           onPress={() => {
             void forget().catch(() =>
               setForgetError(

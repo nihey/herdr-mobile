@@ -1,5 +1,26 @@
 # Verification — October 15, 2026
 
+## Version 0.2.0: Tailscale machines
+
+- Lint, TypeScript and the complete automated suite pass: 49 tests. Coverage now includes safe Tailscale field projection, offline/self peers, invalid inventories, caching and CLI failure handling; authentication before discovery; per-profile credentials, origin deduplication, v1 migration, byte/count limits, interrupted saves/removals and serialized writes.
+- Expo Doctor: 21/21 checks from the mobile workspace.
+- Local live discovery and the updated bridge query returned the expected visible devices. Only the declared peer fields were returned; no other machine was contacted or controlled.
+- Built Android version 0.2.0 / code 2. Its signing certificate matches 0.1.0.
+- Installed over the existing 0.1.0 emulator app without clearing data. The saved v1 connection migrated and connected without re-entering a token.
+- Native discovery displayed three isolated test devices, including an offline peer. Selecting a peer prefilled its private address.
+- Added a second local test bridge with a different token; the app verified it, saved it and selected it.
+- Both test bridges intentionally exposed `w1:p1`. The app loaded only Build output on one host and Studio output after switching back. Saved-profile removal preserved the remaining host, and force-stop/relaunch retained the selection.
+- Independent review found one migration edge for long hostnames; a regression test failed before the generated-display-name fix and passed afterward.
+- Android system Back initially exited from a detail screen. Disabled predictive-back mode for this stack and added a focused home-back handler. The final installed APK passed hardware Back checks from agent detail and Machines, and removal of the last profile returned to initial pairing.
+
+All native multi-host checks use controlled local fixtures. Physical phone connectivity to other tailnet hosts remains a device setup check. Each actual host requires its own bridge/token and a phone-accessible tailnet ACL.
+
+![Saved machines](images/machines.png)
+
+![Tailscale discovery](images/discovery.png)
+
+## Version 0.1.0 baseline
+
 - `npm run lint:fix`, `npm run typecheck`, `npm test`, `npm run format:check`: passed. 25 automated tests across socket transport, authenticated GraphQL and connection validation.
 - Repeated TypeScript/tests/live integration under Node 22.23.3: passed.
 - `npx expo-doctor`: 21/21 checks passed after pinning/deduplicating React and Expo-compatible native peers.

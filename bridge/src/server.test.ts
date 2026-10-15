@@ -58,6 +58,87 @@ function setup() {
   return { calls, query, app };
 }
 describe('authenticated GraphQL bridge', () => {
+  it('requires authentication before discovery and returns only declared fields', async () => {
+    let discoveries = 0;
+    const app = createBridge({
+      token,
+      request: async () => {
+        throw new Error('No Herdr access expected');
+      },
+      discover: async () => {
+        discoveries++;
+        return [
+          {
+            id: 'device',
+            name: 'Laptop',
+            dnsName: 'laptop.example.ts.net',
+            os: 'linux',
+            addresses: ['100.64.0.1'],
+            online: true,
+            self: false,
+          },
+        ];
+      },
+    });
+    const body = JSON.stringify({
+      query:
+        '{ discoveredMachines { id name dnsName os addresses online self } }',
+    });
+    const unauthorized = await app(
+      new Request('http://localhost/graphql', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }),
+    );
+    expect(unauthorized.status).toBe(401);
+    expect(discoveries).toBe(0);
+    const response = await app(
+      new Request('http://localhost/graphql', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body,
+      }),
+    );
+    expect((await response.json()).data.discoveredMachines[0]).toMatchObject({
+      id: 'device',
+      name: 'Laptop',
+    });
+    expect(discoveries).toBe(1);
+  });
+  it('returns useful discovery errors without leaking underlying failures', async () => {
+    for (const failure of [
+      new HerdrError(
+        'TAILSCALE_UNAVAILABLE',
+        'Connect Tailscale on this computer.',
+      ),
+      new Error('sensitive stderr'),
+    ]) {
+      const app = createBridge({
+        token,
+        request: async () => ({}),
+        discover: async () => {
+          throw failure;
+        },
+      });
+      const response = await app(
+        new Request('http://localhost/graphql', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ query: '{discoveredMachines{id}}' }),
+        }),
+      );
+      const body = await response.json();
+      expect(body.errors[0].extensions.code).toBe('TAILSCALE_UNAVAILABLE');
+      expect(JSON.stringify(body)).not.toContain('sensitive stderr');
+    }
+  });
   it('limits streamed request bodies even without a content-length header', async () => {
     const { app, calls } = setup();
     const response = await app(

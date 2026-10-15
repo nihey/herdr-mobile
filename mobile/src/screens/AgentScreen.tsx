@@ -18,6 +18,7 @@ import {
 import { useSession } from '@/lib/session-context';
 import { useSnapshot } from '@/hooks/useSnapshot';
 import { usePoll } from '@/hooks/usePoll';
+import { useHomeBack } from '@/hooks/useHomeBack';
 import { KEYS, OUTPUT, PROMPT, SEND_TEXT } from '@/lib/graphql';
 import { errorMessage } from '@/lib/errors';
 import type { Output } from '@/lib/types';
@@ -47,6 +48,7 @@ const keyButtons = [
   { label: 'n', key: 'n' },
 ];
 export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
+  useHomeBack();
   const { client } = useSession();
   const snapshot = useSnapshot();
   const agent = snapshot.data?.agents.find((item) => item.paneId === paneId);

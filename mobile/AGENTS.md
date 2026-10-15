@@ -5,10 +5,14 @@ This is an Expo/React Native mobile application. Prioritize mobile-first pattern
 - Expo 57 / React Native 0.86, React 19.2.3. Root npm overrides pin React, Reanimated and Worklets to one SDK-compatible version; run Expo Doctor after dependency changes.
 - Routes: `src/app/_layout.tsx`, `index.tsx`, `agent/[paneId].tsx`. Screen components live under `src/screens`; no web Server Components or DOM elements.
 - `src/lib/session-context.tsx` owns SecureStore credentials and the connection-specific Apollo Client. Tokens must never appear in route parameters, logs, screenshots, or compiled environment variables.
+- `src/lib/machines.ts` owns versioned machine storage through an injected storage adapter. A token lives only in its separate profile entry; the v2 index contains IDs/active ID. Migrate v1 after a successful v2 commit. Serialize writes, bound entry bytes and profile count, and deduplicate normalized origins.
+- `src/app/machines.tsx` / MachinesScreen provide saved-host switching, authenticated peer discovery, manual pairing and removal confirmation. PairMachineModal probes SESSION before saving; each bridge has its own token. First pairing remains manual.
+- Agent routes include `machineId`; a mismatch with the active profile redirects home. Home/Machines/Agent screen state is keyed by active profile so pane IDs and outputs never cross hosts.
 - `src/lib/graphql.ts` contains explicit GraphQL operations and a bounded fetch timeout. Mutations do not retry. `src/lib/errors.ts` distinguishes daemon errors from uncertain network delivery.
 - `src/hooks/usePoll.ts` polls only focused foreground screens, with error backoff and stale-result suppression. Agent detail is keyed by host/pane/mode.
 - Native UI primitives and theme live in `src/components/ui.tsx`. Use lucide-react-native icons and in-app Modal dialogs. Prompt sends text + Enter; Type text deliberately sends no Enter.
 - `app.json` configures Android identity, SecureStore, Expo Router and private-network HTTP via expo-build-properties. `android/` is generated and ignored.
+- Keep `android.predictiveBackGestureEnabled` false for the current native navigation stack. Agent/Machines screens use a focused BackHandler to return home; enabling predictive callbacks bypassed that JS behavior in Android emulator checks.
 - Root `npm run build:android` builds a self-contained personal-use APK locally. EAS profiles in eas.json support separate cloud builds.
 - Root tests cover pure connection validation plus bridge security/protocol. Run root lint/typecheck/tests and `npx expo-doctor` before finishing.
 
