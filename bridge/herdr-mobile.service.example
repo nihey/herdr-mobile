@@ -1,0 +1,16 @@
+[Unit]
+Description=Herdr Mobile bridge
+After=network-online.target
+
+[Service]
+Type=simple
+# Replace these two paths with your checkout and absolute Node.js executable.
+WorkingDirectory=/home/YOUR_USER/devel/herdr-mobile/bridge
+ExecStart=/absolute/path/to/node --env-file-if-exists=.env dist/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

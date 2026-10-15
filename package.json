@@ -1,0 +1,43 @@
+{
+  "name": "herdr-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "bridge",
+    "mobile"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "bash dev.sh",
+    "bridge": "npm run dev -w bridge",
+    "mobile": "npm start -w mobile -- --host lan",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "vitest run",
+    "lint": "eslint bridge/src mobile/src scripts",
+    "lint:fix": "npm run lint -- --fix && prettier --write .",
+    "format:check": "prettier --check .",
+    "build:bridge": "npm run build -w bridge",
+    "build:android": "bash scripts/build-android.sh",
+    "integration": "tsx scripts/integration.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^22.0.0",
+    "eslint": "^9.39.0",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.6.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.2",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^5.0.5"
+  },
+  "type": "module",
+  "overrides": {
+    "react": "19.2.3",
+    "react-native-reanimated": "4.5.1",
+    "react-native-worklets": "0.10.1"
+  }
+}
