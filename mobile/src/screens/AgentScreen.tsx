@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -27,6 +27,7 @@ import {
   c,
   ErrorSheet,
   IconButton,
+  LiveBadge,
   Loading,
   mono,
   Notice,
@@ -35,24 +36,37 @@ import {
   Status,
 } from '@/components/ui';
 
-const keyButtons = [
+const navKeys = [
   { label: 'Esc', key: 'esc' },
   { label: 'Tab', key: 'tab' },
   { label: '↑', key: 'up' },
   { label: '↓', key: 'down' },
   { label: '←', key: 'left' },
   { label: '→', key: 'right' },
+];
+const actionKeys = [
   { label: 'Enter ↵', key: 'enter' },
   { label: 'Ctrl+C', key: 'ctrl+c' },
   { label: 'y', key: 'y' },
   { label: 'n', key: 'n' },
 ];
+
+function timeSinceLabel(date: string | undefined): string {
+  if (!date) return '';
+  const delta = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+  if (delta < 5) return 'Updated just now';
+  if (delta < 60) return `Updated ${delta}s ago`;
+  if (delta < 120) return 'Updated 1m ago';
+  return `Updated ${Math.floor(delta / 60)}m ago`;
+}
+
 export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
   useHomeBack();
   const { client } = useSession();
   const snapshot = useSnapshot();
   const agent = snapshot.data?.agents.find((item) => item.paneId === paneId);
   const pane = snapshot.data?.panes.find((item) => item.id === paneId);
+
   const [source, setSource] = useState<'RECENT' | 'VISIBLE'>('RECENT');
   const [draft, setDraft] = useState('');
   const [typeText, setTypeText] = useState(raw);
@@ -60,9 +74,20 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [sent, setSent] = useState('');
   const [follow, setFollow] = useState(true);
+  const [lastFetched, setLastFetched] = useState<string | undefined>();
+  const [newArrived, setNewArrived] = useState(false);
   const scroll = useRef<ScrollView>(null);
   const followRef = useRef(true);
   const sending = useRef(false);
+  const prevTextRef = useRef('');
+  const contentHeightRef = useRef(0);
+
+  const pollInterval = useMemo(() => {
+    if (agent?.status === 'working') return 500;
+    if (agent?.status === 'blocked') return 1200;
+    return 1500;
+  }, [agent?.status]);
+
   const load = useCallback(async () => {
     if (!client) throw new Error('Not connected.');
     const result = await client.query<{ output: Output }>({
@@ -72,7 +97,33 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
     if (!result.data) throw new Error('No output returned.');
     return result.data.output;
   }, [client, paneId, source, raw]);
-  const output = usePoll(load, 1500);
+
+  const output = usePoll(load, pollInterval);
+
+  useEffect(() => {
+    if (output.data) {
+      const text = output.data.text;
+      if (text !== prevTextRef.current) {
+        if (prevTextRef.current && text.length > prevTextRef.current.length) {
+          // Only mark as "new arrived" if user is not following
+          if (!followRef.current) {
+            setNewArrived(true);
+          }
+        }
+        prevTextRef.current = text;
+      }
+      setLastFetched(output.data.fetchedAt);
+    }
+  }, [output.data]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      // Force re-render to update time-since label
+      setLastFetched((prev) => prev);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const act = async (operation: () => Promise<unknown>, after?: () => void) => {
     if (sending.current) return;
     sending.current = true;
@@ -90,6 +141,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
       snapshot.refresh();
     }
   };
+
   const send = () => {
     if (!client || !draft.trim()) return;
     const submitted = draft;
@@ -111,6 +163,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
       },
     );
   };
+
   const sendKey = (key: string) => {
     if (!client) return;
     void act(() =>
@@ -120,11 +173,14 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
       }),
     );
   };
+
   const jump = () => {
     followRef.current = true;
     setFollow(true);
+    setNewArrived(false);
     scroll.current?.scrollToEnd({ animated: true });
   };
+
   const name =
     agent?.name ??
     agent?.title ??
@@ -133,6 +189,8 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
     agent?.kind ??
     'Terminal';
   const blocked = !raw && agent?.status === 'blocked';
+  const lineCount = output.data?.text.split('\n').length ?? 0;
+
   return (
     <Screen>
       <KeyboardAvoidingView
@@ -173,7 +231,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
             </IconButton>
           </View>
           <View style={s.between}>
-            <Status status={agent?.status ?? pane?.status ?? 'unknown'} />
+            <Status status={agent?.status ?? pane?.status ?? 'unknown'} pulse />
             <Text
               numberOfLines={1}
               style={[
@@ -217,16 +275,33 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
           <View
             style={[s.between, { paddingHorizontal: 18, paddingVertical: 10 }]}
           >
-            <Text style={[s.eyebrow, { fontSize: 9, letterSpacing: 1.3 }]}>
-              TERMINAL OUTPUT
-            </Text>
-            <Text style={[s.muted, { fontFamily: mono, fontSize: 9 }]}>
-              {output.error
-                ? 'OFFLINE · CACHED'
-                : output.data
-                  ? new Date(output.data.fetchedAt).toLocaleTimeString()
-                  : 'SYNCING'}
-            </Text>
+            <View style={[s.row, { gap: 10 }]}>
+              <Text style={[s.eyebrow, { fontSize: 9, letterSpacing: 1.3 }]}>
+                TERMINAL OUTPUT
+              </Text>
+              <LiveBadge active={agent?.status === 'working'} />
+            </View>
+            <View
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
+            >
+              {newArrived && (
+                <View
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: 3,
+                    backgroundColor: c.accent,
+                  }}
+                />
+              )}
+              <Text style={[s.muted, { fontFamily: mono, fontSize: 9 }]}>
+                {output.error
+                  ? 'OFFLINE · CACHED'
+                  : output.data
+                    ? timeSinceLabel(lastFetched)
+                    : 'SYNCING'}
+              </Text>
+            </View>
           </View>
           {output.loading && !output.data ? (
             <Loading label="Reading the terminal…" />
@@ -238,9 +313,15 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                 paddingTop: 4,
                 paddingBottom: 30,
               }}
-              onContentSizeChange={() => {
-                if (followRef.current)
-                  scroll.current?.scrollToEnd({ animated: false });
+              onContentSizeChange={(_w, h) => {
+                const prev = contentHeightRef.current;
+                const grew = h > prev;
+                contentHeightRef.current = h;
+                if (followRef.current) {
+                  scroll.current?.scrollToEnd({
+                    animated: grew && h - prev < 400,
+                  });
+                }
               }}
               scrollEventThrottle={100}
               onScroll={(event) => {
@@ -248,7 +329,10 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                   event.nativeEvent;
                 const atBottom =
                   contentOffset.y + layoutMeasurement.height >=
-                  contentSize.height - 60;
+                  contentSize.height - 80;
+                if (atBottom && !followRef.current) {
+                  setNewArrived(false);
+                }
                 followRef.current = atBottom;
                 setFollow(atBottom);
               }}
@@ -264,12 +348,24 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
               >
                 {output.data?.text || 'No output yet.'}
               </Text>
+              {lineCount > 0 && (
+                <Text
+                  style={{
+                    color: c.muted,
+                    fontFamily: mono,
+                    fontSize: 10,
+                    marginTop: 12,
+                  }}
+                >
+                  — {lineCount} line{lineCount === 1 ? '' : 's'} —
+                </Text>
+              )}
             </ScrollView>
           )}
-          {!follow && (
+          {(!follow || newArrived) && (
             <View style={{ position: 'absolute', bottom: 12, right: 14 }}>
               <Button
-                title="Latest"
+                title={newArrived ? 'New output' : 'Latest'}
                 variant="secondary"
                 icon={<ArrowDown color={c.accent} size={15} />}
                 onPress={jump}
@@ -284,7 +380,24 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingHorizontal: 16, gap: 7 }}
           >
-            {keyButtons.map((item) => (
+            {navKeys.map((item) => (
+              <Button
+                key={item.key}
+                title={item.label}
+                variant="secondary"
+                disabled={busy || !!output.error || !output.data}
+                onPress={() => sendKey(item.key)}
+                style={{ paddingHorizontal: 13, borderRadius: 9 }}
+              />
+            ))}
+          </ScrollView>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingHorizontal: 16, gap: 7 }}
+          >
+            {actionKeys.map((item) => (
               <Button
                 key={item.key}
                 title={item.label}

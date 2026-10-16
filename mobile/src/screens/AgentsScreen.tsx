@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import {
   Pressable,
   RefreshControl,
@@ -11,12 +11,16 @@ import {
   ArrowUpRight,
   ChevronRight,
   CircleHelp,
+  Code,
+  Cpu,
   GitFork,
+  MessageSquare,
   Plus,
   RefreshCw,
   Search,
   Settings2,
   Terminal,
+  Zap,
 } from 'lucide-react-native';
 import { useSession } from '@/lib/session-context';
 import { useSnapshot } from '@/hooks/useSnapshot';
@@ -36,6 +40,28 @@ import {
   Status,
 } from '@/components/ui';
 import { StartAgentModal } from './StartAgentModal';
+
+const kindIconMap: Record<string, React.FC<{ size: number; color: string }>> = {
+  codex: Code,
+  claude: MessageSquare,
+  gemini: Zap,
+  opencode: GitFork,
+  cursor: Cpu,
+  copilot: Terminal,
+};
+
+function KindIcon({
+  kind,
+  size = 17,
+  color = c.accent,
+}: {
+  kind: string | null;
+  size?: number;
+  color?: string;
+}) {
+  const Icon = kindIconMap[kind ?? ''] ?? Terminal;
+  return <Icon size={size} color={color} />;
+}
 
 export function AgentsScreen() {
   const { connection, activeMachine, forget, busy } = useSession();
@@ -269,7 +295,7 @@ export function AgentsScreen() {
                         justifyContent: 'center',
                       }}
                     >
-                      <Terminal size={17} color={c.accent} />
+                      <KindIcon kind={agent.kind} size={17} color={c.accent} />
                     </View>
                     <View style={{ flex: 1, gap: 2 }}>
                       <Text

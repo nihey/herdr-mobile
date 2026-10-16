@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Modal,
   Platform,
   Pressable,
@@ -63,6 +64,82 @@ export const s = StyleSheet.create({
   },
   divider: { height: 1, backgroundColor: c.line },
 });
+export function Pulse({
+  color = c.accent,
+  size = 6,
+}: {
+  color?: string;
+  size?: number;
+}) {
+  const anim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 0.35,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+    };
+  }, [anim]);
+  return (
+    <Animated.View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: color,
+        opacity: anim,
+      }}
+    />
+  );
+}
+export function LiveBadge({
+  active,
+  label = 'LIVE',
+}: {
+  active: boolean;
+  label?: string;
+}) {
+  if (!active) return null;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        backgroundColor: '#1B2E1B',
+        paddingHorizontal: 7,
+        paddingVertical: 3,
+        borderRadius: 5,
+        borderWidth: 1,
+        borderColor: '#2F4A2F',
+      }}
+    >
+      <Pulse size={5} />
+      <Text
+        style={{
+          color: c.accent,
+          fontSize: 9,
+          fontWeight: '700',
+          letterSpacing: 1,
+        }}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
 export function Screen({
   children,
   style,
@@ -189,7 +266,13 @@ export function Field({
     </View>
   );
 }
-export function Status({ status }: { status: string }) {
+export function Status({
+  status,
+  pulse = false,
+}: {
+  status: string;
+  pulse?: boolean;
+}) {
   const color =
     status === 'working'
       ? c.accent
@@ -211,9 +294,18 @@ export function Status({ status }: { status: string }) {
         flexShrink: 0,
       }}
     >
-      <View
-        style={{ width: 6, height: 6, backgroundColor: color, borderRadius: 3 }}
-      />
+      {pulse && status === 'working' ? (
+        <Pulse size={6} color={color} />
+      ) : (
+        <View
+          style={{
+            width: 6,
+            height: 6,
+            backgroundColor: color,
+            borderRadius: 3,
+          }}
+        />
+      )}
       <Text style={{ color, fontSize: 12, fontWeight: '500' }}>{label}</Text>
     </View>
   );
