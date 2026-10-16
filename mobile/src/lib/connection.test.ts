@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { normalizeConnection } from './connection';
 describe('connection settings', () => {
   it('normalizes a tailnet origin and trims pasted settings', () => {
-    expect(
-      normalizeConnection(' http://100.64.0.1:8787/ ', ' token '),
-    ).toEqual({ url: 'http://100.64.0.1:8787', token: 'token' });
+    expect(normalizeConnection(' http://100.64.0.1:8787/ ', ' token ')).toEqual(
+      { url: 'http://100.64.0.1:8787', token: 'token' },
+    );
     expect(
       normalizeConnection('https://desktop.tail123.ts.net/graphql', 'secret')
         .url,

@@ -12,3 +12,10 @@ mobile/ios/
 *.log
 *.tsbuildinfo
 .DS_Store
+*.pem
+*.key
+*.jks
+*.keystore
+credentials.json
+google-services.json
+GoogleService-Info.plist

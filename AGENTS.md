@@ -15,6 +15,7 @@ npm workspaces: `mobile/` is an Expo 57 / React Native / TypeScript Android app;
 - UI uses React Native primitives, native Modal dialogs and lucide-react-native; web-only shadcn/Tailwind patterns do not apply to this Expo app.
 - Run `npm run lint:fix`, `npm run typecheck`, `npm test`, and relevant builds before committing.
 - Document architecture/features in this file and subproject AGENTS.md; update README for setup changes.
+- Public source, fixtures, screenshots and commit metadata must use example hosts/paths and a GitHub noreply email. Before publication, scan the entire Git history for secrets and real machine details; keep scan reports and original-history backups in ignored local storage. See SECURITY.md.
 
 ## Commands
 

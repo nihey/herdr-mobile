@@ -6,6 +6,8 @@ See [screenshots and verification](docs/verification.md) for the built APK and n
 
 The app connects over Tailscale to a small authenticated GraphQL bridge on your computer. The bridge uses Herdr's existing local Unix socket. Agents continue running when the phone disconnects.
 
+For credential handling, safe publishing and security reports, see [SECURITY.md](SECURITY.md).
+
 ```text
 Android app → Tailscale → GraphQL bridge :8787 → Herdr Unix socket
 ```
