@@ -107,29 +107,44 @@ export function Pulse({
 export function LiveBadge({
   active,
   label = 'LIVE',
+  tone = 'live',
 }: {
   active: boolean;
   label?: string;
+  tone?: 'live' | 'paused';
 }) {
   if (!active) return null;
+  const paused = tone === 'paused';
+  const color = paused ? c.amber : c.accent;
   return (
     <View
       style={{
         flexDirection: 'row',
         alignItems: 'center',
         gap: 5,
-        backgroundColor: '#1B2E1B',
+        backgroundColor: paused ? '#2E2618' : '#1B2E1B',
         paddingHorizontal: 7,
         paddingVertical: 3,
         borderRadius: 5,
         borderWidth: 1,
-        borderColor: '#2F4A2F',
+        borderColor: paused ? '#5A4A2A' : '#2F4A2F',
       }}
     >
-      <Pulse size={5} />
+      {paused ? (
+        <View
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: 2.5,
+            backgroundColor: color,
+          }}
+        />
+      ) : (
+        <Pulse size={5} />
+      )}
       <Text
         style={{
-          color: c.accent,
+          color,
           fontSize: 9,
           fontWeight: '700',
           letterSpacing: 1,
@@ -161,6 +176,7 @@ export function Button({
   disabled = false,
   busy = false,
   style,
+  accessibilityLabel,
 }: {
   title: string;
   onPress: () => void;
@@ -169,13 +185,14 @@ export function Button({
   disabled?: boolean;
   busy?: boolean;
   style?: ViewStyle;
+  accessibilityLabel?: string;
 }) {
   const fg =
     variant === 'primary' ? c.ink : variant === 'danger' ? c.red : c.text;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={title}
+      accessibilityLabel={accessibilityLabel ?? title}
       disabled={disabled || busy}
       onPress={onPress}
       style={({ pressed }) => [
@@ -210,27 +227,42 @@ export function IconButton({
   label,
   onPress,
   children,
+  primary = false,
+  disabled = false,
+  busy = false,
+  size = 48,
 }: {
   label: string;
   onPress: () => void;
   children: ReactNode;
+  primary?: boolean;
+  disabled?: boolean;
+  busy?: boolean;
+  size?: number;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled || busy}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: disabled || busy, busy }}
       hitSlop={6}
       style={({ pressed }) => ({
-        width: 48,
-        height: 48,
-        borderRadius: 14,
-        backgroundColor: pressed ? c.line : c.panel,
+        width: size,
+        height: size,
+        borderRadius: size > 40 ? 14 : 12,
+        backgroundColor: primary ? c.accent : pressed ? c.line : c.panel,
         alignItems: 'center',
         justifyContent: 'center',
+        opacity: disabled || busy ? 0.45 : primary && pressed ? 0.7 : 1,
       })}
     >
-      {children}
+      {busy ? (
+        <ActivityIndicator color={primary ? c.ink : c.accent} size="small" />
+      ) : (
+        children
+      )}
     </Pressable>
   );
 }

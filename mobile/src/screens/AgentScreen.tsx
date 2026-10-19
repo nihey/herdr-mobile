@@ -1,26 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { router } from 'expo-router';
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowUpRight,
-  RefreshCw,
-  Send,
-} from 'lucide-react-native';
+import { ArrowDown, ArrowLeft, RefreshCw, Send } from 'lucide-react-native';
 import { useSession } from '@/lib/session-context';
 import { useSnapshot } from '@/hooks/useSnapshot';
 import { usePoll } from '@/hooks/usePoll';
 import { useHomeBack } from '@/hooks/useHomeBack';
+import { useDictation } from '@/hooks/useDictation';
 import { KEYS, OUTPUT, PROMPT, SEND_TEXT } from '@/lib/graphql';
 import { errorMessage } from '@/lib/errors';
+import { newLineCount } from '@/lib/terminal';
+import { languageInfo } from '@/lib/dictation';
 import type { Output } from '@/lib/types';
 import {
   Button,
@@ -35,29 +31,36 @@ import {
   Screen,
   Status,
 } from '@/components/ui';
+import {
+  DictationControl,
+  SpeechModelSheet,
+} from '@/components/DictationControl';
 
-const navKeys = [
+type Source = 'RECENT' | 'VISIBLE';
+
+const sources: { label: string; value: Source }[] = [
+  { label: 'Recent', value: 'RECENT' },
+  { label: 'Screen', value: 'VISIBLE' },
+];
+const keys = [
   { label: 'Esc', key: 'esc' },
   { label: 'Tab', key: 'tab' },
   { label: '↑', key: 'up' },
   { label: '↓', key: 'down' },
-  { label: '←', key: 'left' },
-  { label: '→', key: 'right' },
-];
-const actionKeys = [
   { label: 'Enter ↵', key: 'enter' },
   { label: 'Ctrl+C', key: 'ctrl+c' },
   { label: 'y', key: 'y' },
   { label: 'n', key: 'n' },
+  { label: '←', key: 'left' },
+  { label: '→', key: 'right' },
 ];
 
 function timeSinceLabel(date: string | undefined): string {
   if (!date) return '';
   const delta = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
-  if (delta < 5) return 'Updated just now';
-  if (delta < 60) return `Updated ${delta}s ago`;
-  if (delta < 120) return 'Updated 1m ago';
-  return `Updated ${Math.floor(delta / 60)}m ago`;
+  if (delta < 5) return 'just now';
+  if (delta < 60) return `${delta}s ago`;
+  return `${Math.floor(delta / 60)}m ago`;
 }
 
 export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
@@ -67,20 +70,17 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
   const agent = snapshot.data?.agents.find((item) => item.paneId === paneId);
   const pane = snapshot.data?.panes.find((item) => item.id === paneId);
 
-  const [source, setSource] = useState<'RECENT' | 'VISIBLE'>('RECENT');
+  const [source, setSource] = useState<Source>('RECENT');
   const [draft, setDraft] = useState('');
   const [typeText, setTypeText] = useState(raw);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [sent, setSent] = useState('');
-  const [follow, setFollow] = useState(true);
-  const [lastFetched, setLastFetched] = useState<string | undefined>();
-  const [newArrived, setNewArrived] = useState(false);
+  // Output shown while the reader is scrolled up; null follows the live output.
+  const [frozen, setFrozen] = useState<string | null>(null);
   const scroll = useRef<ScrollView>(null);
   const followRef = useRef(true);
   const sending = useRef(false);
-  const prevTextRef = useRef('');
-  const contentHeightRef = useRef(0);
 
   const pollInterval = useMemo(() => {
     if (agent?.status === 'working') return 500;
@@ -99,30 +99,14 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
   }, [client, paneId, source, raw]);
 
   const output = usePoll(load, pollInterval);
-
-  useEffect(() => {
-    if (output.data) {
-      const text = output.data.text;
-      if (text !== prevTextRef.current) {
-        if (prevTextRef.current && text.length > prevTextRef.current.length) {
-          // Only mark as "new arrived" if user is not following
-          if (!followRef.current) {
-            setNewArrived(true);
-          }
-        }
-        prevTextRef.current = text;
-      }
-      setLastFetched(output.data.fetchedAt);
-    }
-  }, [output.data]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      // Force re-render to update time-since label
-      setLastFetched((prev) => prev);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const dictation = useDictation({ onText: setDraft, onError: setActionError });
+  const latest = output.data?.text ?? '';
+  const shown = frozen ?? latest;
+  const following = frozen === null;
+  const pending = useMemo(
+    () => (frozen === null ? 0 : newLineCount(frozen, latest)),
+    [frozen, latest],
+  );
 
   const act = async (operation: () => Promise<unknown>, after?: () => void) => {
     if (sending.current) return;
@@ -144,6 +128,8 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
 
   const send = () => {
     if (!client || !draft.trim()) return;
+    // Send exactly what is on screen; a phrase still being recognized is dropped.
+    dictation.cancel();
     const submitted = draft;
     void act(
       () =>
@@ -174,11 +160,19 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
     );
   };
 
-  const jump = () => {
+  // Programmatic scrolls are never animated, so the only scroll events that
+  // land away from the bottom come from the reader.
+  const follow = () => {
     followRef.current = true;
-    setFollow(true);
-    setNewArrived(false);
-    scroll.current?.scrollToEnd({ animated: true });
+    setFrozen(null);
+    scroll.current?.scrollToEnd({ animated: false });
+  };
+
+  const switchSource = (next: Source) => {
+    if (next === source) return;
+    followRef.current = true;
+    setFrozen(null);
+    setSource(next);
   };
 
   const name =
@@ -188,81 +182,78 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
     pane?.title ??
     agent?.kind ??
     'Terminal';
+  const details = [agent?.kind ?? 'terminal', agent?.cwd ?? pane?.cwd]
+    .filter(Boolean)
+    .join(' · ');
   const blocked = !raw && agent?.status === 'blocked';
-  const lineCount = output.data?.text.split('\n').length ?? 0;
+  const offline = !!output.error || !output.data;
+  const lineCount = shown ? shown.split('\n').length : 0;
+  const jumpLabel =
+    frozen === null || frozen === latest
+      ? 'Latest'
+      : pending === null
+        ? 'New output'
+        : pending > 0
+          ? `${pending} new line${pending === 1 ? '' : 's'}`
+          : 'Latest';
 
   return (
     <Screen>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <View
-          style={{
-            paddingHorizontal: 18,
-            paddingTop: 8,
-            paddingBottom: 14,
-            gap: 12,
-          }}
+          style={[
+            s.between,
+            {
+              paddingHorizontal: 12,
+              paddingTop: 4,
+              paddingBottom: 10,
+              gap: 10,
+            },
+          ]}
         >
-          <View style={s.between}>
-            <IconButton label="Back to agents" onPress={() => router.back()}>
-              <ArrowLeft size={21} color={c.text} />
-            </IconButton>
-            <View style={{ flex: 1, gap: 4 }}>
-              <Text numberOfLines={1} style={[s.heading, { fontSize: 18 }]}>
-                {name}
-              </Text>
+          <IconButton
+            label="Back to agents"
+            onPress={() => router.back()}
+            size={42}
+          >
+            <ArrowLeft size={20} color={c.text} />
+          </IconButton>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text numberOfLines={1} style={[s.heading, { fontSize: 17 }]}>
+              {name}
+            </Text>
+            <View style={[s.row, { gap: 6 }]}>
+              <Status
+                status={agent?.status ?? pane?.status ?? 'unknown'}
+                pulse
+              />
               <Text
                 numberOfLines={1}
-                style={[s.muted, { fontFamily: mono, fontSize: 10 }]}
+                style={[
+                  s.muted,
+                  { flex: 1, fontFamily: mono, fontSize: 10, lineHeight: 14 },
+                ]}
               >
-                {agent?.kind ?? 'terminal'} / {paneId}
+                · {details}
               </Text>
             </View>
-            <IconButton
-              label="Refresh terminal"
-              onPress={() => {
-                output.refresh();
-                snapshot.refresh();
-              }}
-            >
-              <RefreshCw size={18} color={c.accent} />
-            </IconButton>
           </View>
-          <View style={s.between}>
-            <Status status={agent?.status ?? pane?.status ?? 'unknown'} pulse />
-            <Text
-              numberOfLines={1}
-              style={[
-                s.muted,
-                { fontSize: 10, maxWidth: '65%', fontFamily: mono },
-              ]}
-            >
-              {agent?.cwd ?? pane?.cwd ?? ''}
-            </Text>
-          </View>
-          <View style={[s.row, { gap: 8 }]}>
-            <Button
-              title="Recent output"
-              variant={source === 'RECENT' ? 'primary' : 'secondary'}
-              onPress={() => setSource('RECENT')}
-              style={{ minHeight: 42, paddingVertical: 9, flex: 1 }}
-            />
-            <Button
-              title="Visible screen"
-              variant={source === 'VISIBLE' ? 'primary' : 'secondary'}
-              onPress={() => setSource('VISIBLE')}
-              style={{ minHeight: 42, paddingVertical: 9, flex: 1 }}
-            />
-          </View>
-          {!!output.error && (
-            <Notice message={errorMessage(output.error)} danger />
-          )}
-          {blocked && (
-            <Notice message="This agent needs input. Read its question below, then use Type text and the terminal keys to respond." />
-          )}
+          <IconButton
+            label="Refresh terminal"
+            onPress={() => {
+              output.refresh();
+              snapshot.refresh();
+            }}
+            size={42}
+          >
+            <RefreshCw size={18} color={c.accent} />
+          </IconButton>
         </View>
+        {!!output.error && (
+          <View style={{ paddingHorizontal: 12, paddingBottom: 10 }}>
+            <Notice message={errorMessage(output.error)} danger />
+          </View>
+        )}
         <View
           style={{
             flex: 1,
@@ -273,34 +264,41 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
           }}
         >
           <View
-            style={[s.between, { paddingHorizontal: 18, paddingVertical: 10 }]}
+            style={[s.between, { paddingHorizontal: 12, paddingVertical: 7 }]}
           >
-            <View style={[s.row, { gap: 10 }]}>
-              <Text style={[s.eyebrow, { fontSize: 9, letterSpacing: 1.3 }]}>
-                TERMINAL OUTPUT
-              </Text>
-              <LiveBadge active={agent?.status === 'working'} />
-            </View>
-            <View
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
-            >
-              {newArrived && (
-                <View
+            <View style={[s.row, { gap: 5 }]}>
+              {sources.map((item) => (
+                <Button
+                  key={item.value}
+                  title={item.label}
+                  accessibilityLabel={`${item.label} output`}
+                  variant={source === item.value ? 'primary' : 'secondary'}
+                  onPress={() => switchSource(item.value)}
                   style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 3,
-                    backgroundColor: c.accent,
+                    minHeight: 30,
+                    paddingVertical: 4,
+                    paddingHorizontal: 11,
+                    borderRadius: 8,
                   }}
                 />
-              )}
-              <Text style={[s.muted, { fontFamily: mono, fontSize: 9 }]}>
+              ))}
+            </View>
+            <View style={[s.row, { gap: 8 }]}>
+              <Text
+                numberOfLines={1}
+                style={[
+                  s.muted,
+                  { fontFamily: mono, fontSize: 9, lineHeight: 12 },
+                ]}
+              >
                 {output.error
                   ? 'OFFLINE · CACHED'
                   : output.data
-                    ? timeSinceLabel(lastFetched)
+                    ? timeSinceLabel(output.data.fetchedAt)
                     : 'SYNCING'}
               </Text>
+              <LiveBadge active={following && agent?.status === 'working'} />
+              <LiveBadge active={!following} label="PAUSED" tone="paused" />
             </View>
           </View>
           {output.loading && !output.data ? (
@@ -309,19 +307,18 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
             <ScrollView
               ref={scroll}
               contentContainerStyle={{
-                padding: 16,
-                paddingTop: 4,
-                paddingBottom: 30,
+                padding: 14,
+                paddingTop: 2,
+                // Room for the jump pill so it never covers the last lines.
+                paddingBottom: following ? 24 : 64,
               }}
-              onContentSizeChange={(_w, h) => {
-                const prev = contentHeightRef.current;
-                const grew = h > prev;
-                contentHeightRef.current = h;
-                if (followRef.current) {
-                  scroll.current?.scrollToEnd({
-                    animated: grew && h - prev < 400,
-                  });
-                }
+              onLayout={() => {
+                if (followRef.current)
+                  scroll.current?.scrollToEnd({ animated: false });
+              }}
+              onContentSizeChange={() => {
+                if (followRef.current)
+                  scroll.current?.scrollToEnd({ animated: false });
               }}
               scrollEventThrottle={100}
               onScroll={(event) => {
@@ -330,11 +327,9 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                 const atBottom =
                   contentOffset.y + layoutMeasurement.height >=
                   contentSize.height - 80;
-                if (atBottom && !followRef.current) {
-                  setNewArrived(false);
-                }
+                if (atBottom === followRef.current) return;
                 followRef.current = atBottom;
-                setFollow(atBottom);
+                setFrozen(atBottom ? null : shown);
               }}
             >
               <Text
@@ -346,7 +341,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                   lineHeight: 19,
                 }}
               >
-                {output.data?.text || 'No output yet.'}
+                {shown || 'No output yet.'}
               </Text>
               {lineCount > 0 && (
                 <Text
@@ -362,143 +357,182 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
               )}
             </ScrollView>
           )}
-          {(!follow || newArrived) && (
-            <View style={{ position: 'absolute', bottom: 12, right: 14 }}>
+          {!following && (
+            <View
+              pointerEvents="box-none"
+              style={{
+                position: 'absolute',
+                bottom: 12,
+                left: 0,
+                right: 0,
+                alignItems: 'center',
+              }}
+            >
               <Button
-                title={newArrived ? 'New output' : 'Latest'}
-                variant="secondary"
-                icon={<ArrowDown color={c.accent} size={15} />}
-                onPress={jump}
+                title={jumpLabel}
+                accessibilityLabel={`Jump to latest output: ${jumpLabel}`}
+                icon={<ArrowDown color={c.ink} size={15} />}
+                onPress={follow}
+                style={{
+                  minHeight: 36,
+                  paddingVertical: 7,
+                  paddingHorizontal: 14,
+                  borderRadius: 18,
+                }}
               />
             </View>
           )}
         </View>
-        <View style={{ paddingVertical: 10, gap: 10 }}>
+        <View>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingHorizontal: 16, gap: 7 }}
+            contentContainerStyle={{
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              gap: 6,
+            }}
           >
-            {navKeys.map((item) => (
-              <Button
-                key={item.key}
-                title={item.label}
-                variant="secondary"
-                disabled={busy || !!output.error || !output.data}
-                onPress={() => sendKey(item.key)}
-                style={{ paddingHorizontal: 13, borderRadius: 9 }}
-              />
-            ))}
-          </ScrollView>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={{ paddingHorizontal: 16, gap: 7 }}
-          >
-            {actionKeys.map((item) => (
+            {keys.map((item) => (
               <Button
                 key={item.key}
                 title={item.label}
                 variant={item.key === 'ctrl+c' ? 'danger' : 'secondary'}
-                disabled={busy || !!output.error || !output.data}
+                disabled={busy || offline}
                 onPress={() => sendKey(item.key)}
-                style={{ paddingHorizontal: 15, borderRadius: 9 }}
+                style={{
+                  minHeight: 36,
+                  paddingVertical: 6,
+                  paddingHorizontal: 12,
+                  borderRadius: 9,
+                }}
               />
             ))}
           </ScrollView>
-          <View style={{ paddingHorizontal: 16, gap: 8 }}>
-            {!raw && (
-              <View style={s.row}>
-                <Button
-                  title="Prompt"
-                  variant={!typeText ? 'primary' : 'ghost'}
-                  onPress={() => {
-                    setTypeText(false);
-                    setSent('');
-                  }}
-                  style={{ minHeight: 38, paddingVertical: 8 }}
-                />
-                <Button
-                  title="Type text"
-                  variant={typeText ? 'primary' : 'ghost'}
-                  onPress={() => {
-                    setTypeText(true);
-                    setSent('');
-                  }}
-                  style={{ minHeight: 38, paddingVertical: 8 }}
-                />
-                <View style={{ flex: 1 }} />
-                <ArrowUpRight size={15} color={c.muted} />
-              </View>
+          <View style={{ paddingHorizontal: 12, paddingBottom: 8, gap: 6 }}>
+            {blocked && !typeText && (
+              <Text
+                numberOfLines={1}
+                style={{ color: c.amber, fontSize: 11, lineHeight: 15 }}
+              >
+                Needs input · answer with Type or the keys above.
+              </Text>
             )}
-            <View
-              style={{
-                backgroundColor: c.panel,
-                borderRadius: 14,
-                borderWidth: 1,
-                borderColor: c.line,
-                padding: 10,
-                gap: 8,
-              }}
-            >
+            {dictation.listening ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                numberOfLines={1}
+                style={{ color: c.red, fontSize: 11, lineHeight: 15 }}
+              >
+                ● Listening in {languageInfo(dictation.language).name} · tap ■
+                to stop
+              </Text>
+            ) : dictation.notice ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                numberOfLines={2}
+                style={{ color: c.amber, fontSize: 11, lineHeight: 15 }}
+              >
+                {dictation.notice}
+              </Text>
+            ) : (
+              !!sent && (
+                <Text
+                  accessibilityLiveRegion="polite"
+                  numberOfLines={1}
+                  style={{ color: c.accent, fontSize: 11, lineHeight: 15 }}
+                >
+                  {sent}
+                </Text>
+              )
+            )}
+            <View style={[s.row, { gap: 8, alignItems: 'flex-end' }]}>
+              {!raw && (
+                <Button
+                  title={typeText ? 'Type' : 'Prompt'}
+                  accessibilityLabel={
+                    typeText
+                      ? 'Mode: type text. Switch to prompt'
+                      : 'Mode: prompt. Switch to type text'
+                  }
+                  variant="secondary"
+                  onPress={() => {
+                    setTypeText((value) => !value);
+                    setSent('');
+                  }}
+                  style={{
+                    minHeight: 42,
+                    minWidth: 76,
+                    paddingVertical: 8,
+                    paddingHorizontal: 11,
+                  }}
+                />
+              )}
               <TextInput
                 accessibilityLabel={typeText ? 'Terminal text' : 'Agent prompt'}
                 placeholder={
-                  typeText
-                    ? 'Type into this terminal…'
-                    : 'What should this agent do next?'
+                  typeText ? 'Text · no Enter' : 'Prompt · sends Enter'
                 }
                 placeholderTextColor={c.muted}
                 multiline
                 value={draft}
-                onChangeText={setDraft}
-                editable={!busy}
+                onChangeText={(value) => {
+                  setDraft(value);
+                  setSent('');
+                }}
+                editable={!busy && !dictation.listening}
                 selectionColor={c.accent}
                 style={{
+                  flex: 1,
                   color: c.text,
+                  backgroundColor: c.panel,
+                  borderRadius: 12,
+                  borderWidth: 1,
+                  borderColor: c.line,
                   minHeight: 42,
-                  maxHeight: 120,
+                  maxHeight: 110,
                   fontSize: 14,
-                  padding: 5,
-                  textAlignVertical: 'top',
+                  paddingHorizontal: 12,
+                  paddingVertical: 9,
+                  textAlignVertical: 'center',
                 }}
               />
-              <View style={s.between}>
-                <Text style={[s.muted, { fontSize: 10, flex: 1 }]}>
-                  {typeText
-                    ? 'Types literally · use Enter to submit'
-                    : 'Sends your prompt + Enter'}
-                </Text>
-                <Button
-                  title={typeText ? 'Type' : 'Send'}
-                  onPress={send}
-                  busy={busy}
-                  disabled={
-                    !draft.trim() ||
-                    !!output.error ||
-                    !output.data ||
-                    (blocked && !typeText)
+              <DictationControl
+                language={dictation.language}
+                listening={dictation.listening}
+                disabled={busy}
+                onToggle={() => {
+                  if (dictation.listening) {
+                    dictation.stop();
+                    return;
                   }
-                  icon={typeText ? undefined : <Send size={14} color={c.ink} />}
-                  style={{ minHeight: 40, paddingVertical: 9 }}
-                />
-              </View>
-            </View>
-            {!!sent && (
-              <Text
-                accessibilityLiveRegion="polite"
-                style={[s.muted, { color: c.accent, fontSize: 11 }]}
+                  setSent('');
+                  void dictation.start(draft);
+                }}
+                onSwitchLanguage={dictation.switchLanguage}
+              />
+              <IconButton
+                label={typeText ? 'Type text into terminal' : 'Send prompt'}
+                onPress={send}
+                primary
+                busy={busy}
+                disabled={!draft.trim() || offline || (blocked && !typeText)}
+                size={42}
               >
-                {sent}
-              </Text>
-            )}
+                <Send size={17} color={c.ink} />
+              </IconButton>
+            </View>
           </View>
         </View>
         <ErrorSheet
           message={actionError}
           onClose={() => setActionError(null)}
+        />
+        <SpeechModelSheet
+          language={dictation.missing}
+          onDownload={() => void dictation.download()}
+          onClose={dictation.dismissMissing}
         />
       </KeyboardAvoidingView>
     </Screen>

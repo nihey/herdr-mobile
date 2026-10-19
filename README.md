@@ -83,13 +83,18 @@ Install by copying the APK to your phone and opening it, or with a connected USB
 adb install -r artifacts/herdr-mobile.apk
 ```
 
+### Test builds over the air
+
+Firebase App Distribution is the Android counterpart to TestFlight and accepts the APK as is; the app needs no Firebase SDK or `google-services.json`. In your own Firebase project, register an Android app with package `dev.herdr.mobile`, create a tester group, then bump `version`/`versionCode` in `mobile/app.json`, build, and drop `artifacts/herdr-mobile.apk` on App Distribution › Releases (or run `firebase appdistribution:distribute artifacts/herdr-mobile.apk --app <firebase-app-id> --groups <group-alias>`). Testers accept the emailed invite and install updates through the Firebase App Tester app. An update installs only when it has the same signing key. The local build uses React Native's public debug key, which is fine for your own devices; before inviting other people, switch to a private release key (EAS or your own keystore), since a key change makes every tester uninstall first.
+
 Native projects are generated from `mobile/app.json`. Do not edit generated Android files. To create a signed distributable through EAS, run `npx eas-cli@latest build --platform android --profile preview` from `mobile/` after configuring your own Expo project. `production` builds an AAB. The local APK is intended for personal use; retain your signing key if you plan to distribute updates.
 
 ## Using the app
 
 - **Agents:** filter by workspace or directory/name, see working/idle/done/needs-input state, and tap an agent to inspect its terminal. Status is Herdr's detection; inspect the screen before acting on an unexpected question.
-- **Recent output / Visible screen:** choose unwrapped recent output or the current rendered terminal screen. Select/copy terminal text. Scrolling up pauses following the latest output; tap **Latest** to resume.
+- **Recent / Screen:** choose unwrapped recent output or the current rendered terminal screen. Select/copy terminal text. Scrolling up freezes the text where you are reading (**PAUSED**) while the agent keeps working; the pill counts new lines. Tap it or scroll to the bottom to resume following.
 - **Prompt:** explicitly sends the text plus Enter. **Type text:** writes literal terminal text without Enter, useful for interactive responses. Use the key toolbar to finish a reply or navigate a question. The app does not automatically answer approvals.
+- **Dictation:** tap the mic beside the composer and speak; words appear in the draft as you talk. Tap ■ to stop, review, then send. Nothing is sent automatically. The **EN/PT** chip picks English or Brazilian Portuguese before you speak and is remembered. Recognition runs only on the phone through Android's on-device speech engine (Android 13+); the first use of each language offers Android's one-time offline model download. Audio and transcripts never go to the bridge or any cloud service.
 - **Ctrl+C** sends an interrupt to the selected terminal. It can stop the foreground task.
 - **Other terminals:** inspect a shell or unrecognized process. **Start an agent here** launches an installed agent CLI in that explicit pane; Herdr verifies availability. Enter a unique lowercase agent name and a Herdr agent kind.
 - Foreground state/output refresh approximately every 3/1.5 seconds, with bounded backoff on failures. Background polling pauses. No push/background notifications in this version.
@@ -123,6 +128,7 @@ Tests exercise socket framing, daemon errors, correlation, disconnect/timeout ha
 - **Agent blocked:** inspect the visible screen, switch to Type text, and use logical terminal keys to answer intentionally.
 - **No such agent / pane:** refresh the list; panes may have closed or moved. Cross-workspace moves change public pane IDs.
 - **Start timeout or uncertain delivery:** inspect the pane before retrying; the agent may still have started.
+- **Dictation unavailable:** grant the microphone permission (Android Settings › Apps › Herdr › Permissions). If the download prompt keeps returning, check the language under Settings › Android System Intelligence › On-device speech recognition, or update Speech Recognition & Synthesis from Google Play.
 - **Local build SDK error:** set `ANDROID_HOME` to your SDK and install SDK 36 plus any SDK/NDK components requested by Gradle. Gradle downloads its toolchain on the first build.
 
 HTTP is enabled in Android so tailnet addresses work directly. Tailscale encrypts traffic between tailnet devices; use an HTTPS endpoint for connections outside that network. The bridge has no unauthenticated data operations, arbitrary shell API, or Herdr shutdown endpoint.
