@@ -84,7 +84,7 @@ export function useDictation({
       event.error === 'language-not-supported'
         ? `This phone's offline speech engine does not support ${name}.`
         : event.error === 'not-allowed' || event.error === 'service-not-allowed'
-          ? 'Herdr needs microphone access to dictate. Allow it in Android Settings › Apps › Herdr › Permissions.'
+          ? 'Herd Remote needs microphone access to dictate. Allow it in Android Settings › Apps › Herd Remote › Permissions.'
           : `Dictation stopped: ${event.message}`,
     );
   });
@@ -105,7 +105,7 @@ export function useDictation({
           await ExpoSpeechRecognitionModule.requestMicrophonePermissionsAsync();
         if (!permission.granted) {
           onError(
-            'Herdr needs microphone access to dictate. Allow it in Android Settings › Apps › Herdr › Permissions.',
+            'Herd Remote needs microphone access to dictate. Allow it in Android Settings › Apps › Herd Remote › Permissions.',
           );
           return;
         }

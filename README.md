@@ -2,11 +2,13 @@
 
 An Expo Android companion for [Herdr](https://github.com/herdrdev/herdr). Check agent status, read terminal output, send prompts, respond to approval screens with terminal keys, and start agents in existing available panes. Discover Tailscale devices and save multiple independently paired machines.
 
+The Android app is named **Herd Remote** (package `io.github.nihey.herdremote`). It is an unofficial companion and is not affiliated with the Herdr project.
+
 See [screenshots and verification](docs/verification.md) for the built APK and native app checks.
 
 The app connects over Tailscale to a small authenticated GraphQL bridge on your computer. The bridge uses Herdr's existing local Unix socket. Agents continue running when the phone disconnects.
 
-For credential handling, safe publishing and security reports, see [SECURITY.md](SECURITY.md).
+For credential handling, safe publishing and security reports, see [SECURITY.md](SECURITY.md). The app's privacy policy is [PRIVACY.md](PRIVACY.md).
 
 ```text
 Android app → Tailscale → GraphQL bridge :8787 → Herdr Unix socket
@@ -37,7 +39,7 @@ npm run pairing -w bridge
 
 Use the bridge URL printed by the pairing command (`http://<your-tailscale-ip>:8787`); verify your address with `tailscale ip -4`. The pairing command prints the token locally. Do not share it: it authorizes control of this Herdr session. Token generation is automatic; `.local/pairing-token` is ignored and restricted to its owner. The app saves credentials in Expo SecureStore.
 
-Open Herdr on Android, enter that address and token, then tap **Connect to Herdr**. Neither an Expo account nor a public hosting service is required to use a locally built APK.
+Open Herd Remote on Android, enter that address and token, then tap **Connect to Herdr**. Neither an Expo account nor a public hosting service is required to use a locally built APK.
 
 ## Discover and add other machines
 
@@ -75,7 +77,7 @@ Open the displayed QR code with a compatible Expo Go version on Android. Both de
 npm run build:android
 ```
 
-Output: `artifacts/herdr-mobile.apk`. This is a standalone release-mode APK with its JS bundle included, signed using the generated Android debug key for personal sideloading. The default architecture is arm64-v8a. Use `ANDROID_ARCHITECTURES=arm64-v8a,x86_64 npm run build:android` for an emulator-compatible APK, or include all supported architectures if needed.
+Output: `artifacts/herdr-mobile.apk`. This is a standalone release-mode APK with its JS bundle included. It is signed with your private upload key when `.local/upload-keystore.properties` exists (see below). Otherwise it uses React Native's public debug key, which is suitable only for personal sideloading. The default architecture is arm64-v8a. Use `ANDROID_ARCHITECTURES=arm64-v8a,x86_64 npm run build:android` for an emulator-compatible APK, or include all supported architectures if needed.
 
 Install by copying the APK to your phone and opening it, or with a connected USB device:
 
@@ -85,7 +87,27 @@ adb install -r artifacts/herdr-mobile.apk
 
 ### Test builds over the air
 
-Firebase App Distribution is the Android counterpart to TestFlight and accepts the APK as is; the app needs no Firebase SDK or `google-services.json`. In your own Firebase project, register an Android app with package `dev.herdr.mobile`, create a tester group, then bump `version`/`versionCode` in `mobile/app.json`, build, and drop `artifacts/herdr-mobile.apk` on App Distribution › Releases (or run `firebase appdistribution:distribute artifacts/herdr-mobile.apk --app <firebase-app-id> --groups <group-alias>`). Testers accept the emailed invite and install updates through the Firebase App Tester app. An update installs only when it has the same signing key. The local build uses React Native's public debug key, which is fine for your own devices; before inviting other people, switch to a private release key (EAS or your own keystore), since a key change makes every tester uninstall first.
+Firebase App Distribution is the Android counterpart to TestFlight and accepts the APK as is; the app needs no Firebase SDK or `google-services.json`. In your own Firebase project, register an Android app with package `io.github.nihey.herdremote`, create a tester group, then bump `version`/`versionCode` in `mobile/app.json`, build, and drop `artifacts/herdr-mobile.apk` on App Distribution › Releases (or run `firebase appdistribution:distribute artifacts/herdr-mobile.apk --app <firebase-app-id> --groups <group-alias>`). Testers accept the emailed invite and install updates through the Firebase App Tester app. An update installs only when it has the same signing key, so build test APKs with the upload key before inviting other people.
+
+### Publish to Google Play
+
+Play requires an App Bundle signed with a private upload key. Create the key once and keep both files out of Git (`.local/` is ignored):
+
+```bash
+umask 077
+keytool -genkeypair -keystore .local/upload-keystore.jks -storetype PKCS12 -alias upload \
+  -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Herd Remote upload key"
+printf 'storeFile=%s\nstorePassword=<password>\nkeyAlias=upload\nkeyPassword=<password>\n' \
+  "$PWD/.local/upload-keystore.jks" > .local/upload-keystore.properties
+```
+
+Back up both files privately. Play App Signing holds the key that signs the installed app. If you lose the upload key, Play support can reset it, but you can't upload updates until it does.
+
+```bash
+npm run build:android:bundle
+```
+
+Output: `artifacts/herdr-mobile.aab`, covering all four Android ABIs. The build script passes the key to Gradle through the environment, so passwords never appear in process arguments. Bump `version` and `versionCode` in `mobile/app.json` for every upload. Upload the bundle in Play Console › Test and release, starting with internal testing. Use [PRIVACY.md](PRIVACY.md) on GitHub as the privacy policy URL.
 
 Native projects are generated from `mobile/app.json`. Do not edit generated Android files. To create a signed distributable through EAS, run `npx eas-cli@latest build --platform android --profile preview` from `mobile/` after configuring your own Expo project. `production` builds an AAB. The local APK is intended for personal use; retain your signing key if you plan to distribute updates.
 
@@ -103,7 +125,7 @@ Native projects are generated from `mobile/app.json`. Do not edit generated Andr
 
 ## Keep the bridge running
 
-For development, use the tmux launcher. For longer-term use, adapt `bridge/herdr-mobile.service.example` into `~/.config/systemd/user/herdr-mobile.service`, build the bridge, and run `systemctl --user enable --now herdr-mobile`. Replace the example checkout and Node paths first. Start Herdr normally; this bridge never starts/stops your existing daemon. The user service restarts if Tailscale is temporarily unavailable.
+For development, use the tmux launcher. For longer-term use, adapt `bridge/herdr-mobile.service.example` into `~/.config/systemd/user/herdr-mobile.service`, build the bridge, and run `systemctl --user enable --now herdr-mobile`. Replace the example checkout and Node paths first. To start it at boot rather than at your first login, run `loginctl enable-linger "$USER"` once. After changing bridge code, run `npm run build:bridge && systemctl --user restart herdr-mobile`; check it with `journalctl --user -u herdr-mobile`. Start Herdr normally; this bridge never starts/stops your existing daemon. The user service restarts if Tailscale is temporarily unavailable.
 
 ## Checks
 
@@ -128,7 +150,7 @@ Tests exercise socket framing, daemon errors, correlation, disconnect/timeout ha
 - **Agent blocked:** inspect the visible screen, switch to Type text, and use logical terminal keys to answer intentionally.
 - **No such agent / pane:** refresh the list; panes may have closed or moved. Cross-workspace moves change public pane IDs.
 - **Start timeout or uncertain delivery:** inspect the pane before retrying; the agent may still have started.
-- **Dictation unavailable:** grant the microphone permission (Android Settings › Apps › Herdr › Permissions). If the download prompt keeps returning, check the language under Settings › Android System Intelligence › On-device speech recognition, or update Speech Recognition & Synthesis from Google Play.
+- **Dictation unavailable:** grant the microphone permission (Android Settings › Apps › Herd Remote › Permissions). If the download prompt keeps returning, check the language under Settings › Android System Intelligence › On-device speech recognition, or update Speech Recognition & Synthesis from Google Play.
 - **Local build SDK error:** set `ANDROID_HOME` to your SDK and install SDK 36 plus any SDK/NDK components requested by Gradle. Gradle downloads its toolchain on the first build.
 
 HTTP is enabled in Android so tailnet addresses work directly. Tailscale encrypts traffic between tailnet devices; use an HTTPS endpoint for connections outside that network. The bridge has no unauthenticated data operations, arbitrary shell API, or Herdr shutdown endpoint.

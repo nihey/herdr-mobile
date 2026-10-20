@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Herdr",
+    "name": "Herd Remote",
     "slug": "herdr-mobile",
     "version": "0.3.0",
     "orientation": "portrait",
@@ -10,13 +10,21 @@
       "supportsTablet": true
     },
     "android": {
-      "package": "dev.herdr.mobile",
+      "package": "io.github.nihey.herdremote",
       "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#111B18"
       },
       "permissions": ["INTERNET"],
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.VIBRATE"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "plugins": [

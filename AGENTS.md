@@ -9,6 +9,8 @@ npm workspaces: `mobile/` is an Expo 57 / React Native / TypeScript Android app;
 - Tailscale discovery is an authenticated GraphQL query backed by a bounded local `tailscale status --json` call. Return only peer identity/name, tailnet addresses, OS and online/self flags. No remote probing or installation.
 - Machine changes stop the previous Apollo client and reset host-specific UI. Agent routes require the active machine ID as well as the pane ID; never resolve a route from another host.
 - Default network binding is the Tailscale IPv4, not 0.0.0.0. Local HTTP is for the encrypted tailnet. Use HTTPS if exposed through a TLS endpoint.
+- The Android app ships as "Herd Remote" (`io.github.nihey.herdremote`), an unofficial Herdr companion. Never brand it as Herdr itself or imply affiliation. The package is permanent on Google Play. PRIVACY.md is the Play privacy policy; keep it accurate when data handling changes.
+- Release builds are signed with a private upload key from ignored `.local/upload-keystore.properties`, passed to Gradle via the environment, never argv. Play bundles refuse to build without it; never commit, print or log the key or its passwords.
 - Voice dictation is on-device only (Android offline speech models, English and pt-BR). Audio and transcripts never leave the phone; dictation fills the draft and never sends by itself.
 - No automatic mutation retries. A failed connection after submission means uncertain delivery.
 - Do not test by sending prompts or keys to existing user agents. Use a disposable named Herdr session or a mock socket.
@@ -20,6 +22,6 @@ npm workspaces: `mobile/` is an Expo 57 / React Native / TypeScript Android app;
 
 ## Commands
 
-`npm run bridge`, `npm run mobile`, `npm run pairing -w bridge`, `npm run build:bridge`, `npm run build:android`.
+`npm run bridge`, `npm run mobile`, `npm run pairing -w bridge`, `npm run build:bridge`, `npm run build:android`, `npm run build:android:bundle`.
 
 Design and execution notes live under docs/. See README.md for device setup.

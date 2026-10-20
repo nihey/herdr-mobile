@@ -20,6 +20,7 @@
     "format:check": "prettier --check .",
     "build:bridge": "npm run build -w bridge",
     "build:android": "bash scripts/build-android.sh",
+    "build:android:bundle": "bash scripts/build-android.sh bundle",
     "integration": "tsx scripts/integration.ts"
   },
   "devDependencies": {

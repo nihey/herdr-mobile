@@ -16,7 +16,7 @@ This is an Expo/React Native mobile application. Prioritize mobile-first pattern
 - Android is edge-to-edge, so `adjustResize` no longer moves content: the agent screen's KeyboardAvoidingView uses `padding` on both platforms to keep the composer above the keyboard.
 - `app.json` configures Android identity, SecureStore, Expo Router and private-network HTTP via expo-build-properties. `android/` is generated and ignored.
 - Keep `android.predictiveBackGestureEnabled` false for the current native navigation stack. Agent/Machines screens use a focused BackHandler to return home; enabling predictive callbacks bypassed that JS behavior in Android emulator checks.
-- Root `npm run build:android` builds a self-contained personal-use APK locally. EAS profiles in eas.json support separate cloud builds.
+- Root `npm run build:android` builds a self-contained APK locally; `npm run build:android:bundle` builds the Play App Bundle (all ABIs). Both sign with the upload key when `.local/upload-keystore.properties` exists. `app.json` `blockedPermissions` strips permissions merged from libraries and the template that the app never uses; check `aapt2 dump permissions` after adding a native dependency. EAS profiles in eas.json support separate cloud builds.
 - Root tests cover pure connection validation plus bridge security/protocol. Run root lint/typecheck/tests and `npx expo-doctor` before finishing.
 
 ## Expo has changed — do not trust your training data

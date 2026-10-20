@@ -8,7 +8,7 @@ export default function Home() {
   if (!ready)
     return (
       <Screen>
-        <Loading label="Opening Herdr…" />
+        <Loading label="Opening Herd Remote…" />
       </Screen>
     );
   return connection ? (
