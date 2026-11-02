@@ -58,7 +58,7 @@ export function ConnectScreen() {
               <GitFork color={c.ink} size={28} />
             </View>
             <Text style={[s.heading, { fontSize: 25, letterSpacing: -1 }]}>
-              herdr<Text style={{ color: c.muted }}> / mobile</Text>
+              Herd Remote
             </Text>
           </View>
           <Text style={s.eyebrow}>YOUR AGENTS. WITH YOU.</Text>
@@ -71,8 +71,8 @@ export function ConnectScreen() {
               { fontSize: 16, lineHeight: 24, marginBottom: 10 },
             ]}
           >
-            Pick up where your computer left off. Connect to Herdr through your
-            private network.
+            Pick up where your computer left off. An unofficial Herdr companion
+            that connects through your private network.
           </Text>
           <Field
             label="Bridge address"

@@ -26,6 +26,7 @@ function setup() {
                 name: 'coder',
                 agent: 'codex',
                 agent_status: 'working',
+                terminal_title_stripped: '✳ Fix login',
               },
             ],
             panes: [],
@@ -56,6 +57,167 @@ function setup() {
     return { status: response.status, body: await response.json() };
   };
   return { calls, query, app };
+}
+function sessionSetup({
+  failStart = '',
+  shellBusyPolls = 0,
+  settled = 'idle',
+  processInfoFails = false,
+  manifestsFail = false,
+  agentProcess = true,
+  totalMs = 9000,
+}: {
+  failStart?: string;
+  shellBusyPolls?: number;
+  /** Agent state agent.get reports after start; 'gone' = agent_not_found. */
+  settled?: string;
+  processInfoFails?: boolean;
+  manifestsFail?: boolean;
+  /** Whether the launched CLI keeps running in the pane's foreground. */
+  agentProcess?: boolean;
+  totalMs?: number;
+} = {}) {
+  let busyPolls = shellBusyPolls;
+  let started = false;
+  const calls: {
+    method: string;
+    params: Record<string, unknown>;
+    timeoutMs?: number;
+  }[] = [];
+  const app = createBridge({
+    token,
+    startTiming: {
+      pollMs: 1,
+      settleMs: 0,
+      shellTimeoutMs: 1000,
+      exitGraceMs: 0,
+      totalMs,
+    },
+    request: async (method, params = {}, timeoutMs) => {
+      if (method === 'pane.process_info') {
+        calls.push({ method, params });
+        if (processInfoFails)
+          throw new HerdrError('unsupported', 'process info unavailable');
+        // Startup scripts run as children of the shell, then it idles alone
+        // until the agent CLI runs in the foreground.
+        const busy = busyPolls-- > 0 || (started && agentProcess);
+        return {
+          process_info: {
+            shell_pid: 10,
+            foreground_process_group_id: 10,
+            foreground_processes: busy
+              ? [
+                  { pid: 10, name: 'bash' },
+                  { pid: 11, name: 'conda' },
+                ]
+              : [{ pid: 10, name: 'bash' }],
+          },
+        };
+      }
+      calls.push(
+        timeoutMs === undefined
+          ? { method, params }
+          : { method, params, timeoutMs },
+      );
+      if (method === 'session.snapshot')
+        return {
+          snapshot: {
+            version: '0.9.4',
+            protocol: 22,
+            workspaces: [
+              { workspace_id: 'w1', label: 'API', agent_status: 'working' },
+              { workspace_id: 'w2', label: 'Site', agent_status: 'idle' },
+              { workspace_id: 'w3', label: 'Empty', agent_status: 'idle' },
+            ],
+            tabs: [],
+            agents: [
+              {
+                pane_id: 'w2:p1',
+                workspace_id: 'w2',
+                name: 'taken',
+                agent: 'claude',
+                agent_status: 'idle',
+              },
+            ],
+            panes: [
+              {
+                pane_id: 'w1:p1',
+                workspace_id: 'w1',
+                tab_id: 'w1:t1',
+                cwd: '/work/api',
+                foreground_cwd: '/work/api/src',
+                agent_status: 'working',
+              },
+              {
+                pane_id: 'w1:p2',
+                workspace_id: 'w1',
+                tab_id: 'w1:t2',
+                cwd: '/elsewhere',
+                agent_status: 'idle',
+              },
+              {
+                pane_id: 'w2:p1',
+                workspace_id: 'w2',
+                tab_id: 'w2:t1',
+                cwd: null,
+                foreground_cwd: '/work/site',
+                agent_status: 'idle',
+              },
+            ],
+          },
+        };
+      if (method === 'server.agent_manifests' && manifestsFail)
+        throw new HerdrError('unavailable', 'manifests unavailable');
+      if (method === 'server.agent_manifests')
+        return {
+          manifests: [
+            { agent: 'claude' },
+            { agent: 'codex' },
+            { agent: 'claude' },
+            { agent: 'Bad Kind' },
+            { agent: 42 },
+            { agent: 'pi' },
+          ],
+        };
+      if (method === 'tab.create')
+        return {
+          type: 'tab_created',
+          tab: { tab_id: 'w1:t9', workspace_id: params.workspace_id },
+          root_pane: { pane_id: 'w1:p9' },
+        };
+      if (method === 'agent.start' && failStart === 'missing')
+        throw new HerdrError('agent_not_found', 'claude is not installed');
+      if (method === 'agent.start' && failStart === 'blocked')
+        throw new HerdrError('agent_not_ready', 'claude is blocked');
+      if (method === 'agent.start') started = true;
+      if (method === 'agent.get') {
+        if (settled === 'gone')
+          throw new HerdrError('agent_not_found', 'agent target not found');
+        return {
+          type: 'agent_info',
+          agent: {
+            agent_status: settled,
+            launch_pending: settled === 'unknown',
+          },
+        };
+      }
+      return { type: 'ok' };
+    },
+  });
+  const query = async (query: string) => {
+    const response = await app(
+      new Request('http://localhost/graphql', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ query }),
+      }),
+    );
+    return { status: response.status, body: await response.json() };
+  };
+  return { calls, query };
 }
 describe('authenticated GraphQL bridge', () => {
   it('requires authentication before discovery and returns only declared fields', async () => {
@@ -169,13 +331,14 @@ describe('authenticated GraphQL bridge', () => {
   it('maps snapshots to stable public identifiers', async () => {
     const { query } = setup();
     const { body } = await query(
-      '{ session { version workspaces { id label } agents { paneId kind status } } }',
+      '{ session { version workspaces { id label } agents { paneId kind status title } } }',
     );
     expect(body.errors).toBeUndefined();
     expect(body.data.session.agents[0]).toEqual({
       paneId: 'w1:p1',
       kind: 'codex',
       status: 'working',
+      title: '✳ Fix login',
     });
     expect(body.data.session.workspaces[0].id).toBe('w1');
   });
@@ -235,6 +398,193 @@ describe('authenticated GraphQL bridge', () => {
     expect(calls.map((c) => c.method)).toEqual([
       'pane.send_text',
       'pane.send_keys',
+    ]);
+  });
+  it('exposes each workspace project folder from its first pane', async () => {
+    const { query } = sessionSetup();
+    const { body } = await query('{ session { workspaces { id cwd } } }');
+    expect(body.errors).toBeUndefined();
+    expect(body.data.session.workspaces).toEqual([
+      { id: 'w1', cwd: '/work/api' },
+      { id: 'w2', cwd: '/work/site' },
+      { id: 'w3', cwd: null },
+    ]);
+  });
+  it('lists validated agent kinds from Herdr manifests', async () => {
+    const { query, calls } = sessionSetup();
+    const { body } = await query('{ agentKinds }');
+    expect(body.errors).toBeUndefined();
+    expect(body.data.agentKinds).toEqual(['claude', 'codex', 'pi']);
+    expect(calls.map((c) => c.method)).toEqual(['server.agent_manifests']);
+  });
+  it('starts a session in a new unfocused tab in the project folder', async () => {
+    const { query, calls } = sessionSetup();
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"w1", kind:"claude", name:"claude-2") { paneId tabId workspaceId name kind ready } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startSession).toEqual({
+      paneId: 'w1:p9',
+      tabId: 'w1:t9',
+      workspaceId: 'w1',
+      name: 'claude-2',
+      kind: 'claude',
+      ready: true,
+    });
+    expect(calls).toEqual([
+      { method: 'session.snapshot', params: {} },
+      {
+        method: 'tab.create',
+        params: {
+          workspace_id: 'w1',
+          label: 'claude-2',
+          focus: false,
+          cwd: '/work/api',
+        },
+      },
+      { method: 'pane.process_info', params: { pane_id: 'w1:p9' } },
+      {
+        method: 'agent.start',
+        params: {
+          pane_id: 'w1:p9',
+          name: 'claude-2',
+          kind: 'claude',
+          timeout_ms: 25000,
+        },
+        timeoutMs: 30000,
+      },
+      { method: 'agent.get', params: { target: 'w1:p9' } },
+    ]);
+  });
+  it('reports a launched CLI that exits back to the shell', async () => {
+    const { query } = sessionSetup({ settled: 'unknown', agentProcess: false });
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"w1", kind:"gemini", name:"gemini-1") { paneId } }',
+    );
+    expect(body.errors[0].extensions).toMatchObject({
+      code: 'agent_not_found',
+      paneId: 'w1:p9',
+    });
+    expect(body.errors[0].message).toContain('gemini exited');
+  });
+  it('reports an agent that Herdr no longer knows after launching', async () => {
+    const { query } = sessionSetup({ settled: 'gone' });
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"w1", kind:"claude", name:"claude-2") { paneId } }',
+    );
+    expect(body.errors[0].extensions).toMatchObject({
+      code: 'agent_not_found',
+      paneId: 'w1:p9',
+      tabId: 'w1:t9',
+    });
+    expect(body.errors[0].message).toContain('claude');
+  });
+  it('still starts the agent when the shell check is unavailable', async () => {
+    const { query, calls } = sessionSetup({ processInfoFails: true });
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"w1", kind:"claude", name:"claude-2") { paneId ready } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startSession).toEqual({ paneId: 'w1:p9', ready: true });
+    expect(calls.map((c) => c.method)).toContain('agent.start');
+  });
+  it('rejects a name another live agent uses before opening a tab', async () => {
+    const { query, calls } = sessionSetup();
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"w1", kind:"claude", name:"taken") { paneId } }',
+    );
+    expect(body.errors?.[0].extensions.code).toBe('BAD_USER_INPUT');
+    expect(calls.map((c) => c.method)).toEqual(['session.snapshot']);
+  });
+  it('lists no kinds rather than failing when manifests are unavailable', async () => {
+    const { query } = sessionSetup({ manifestsFail: true });
+    const { body } = await query('{ agentKinds }');
+    expect(body.errors).toBeUndefined();
+    expect(body.data.agentKinds).toEqual([]);
+  });
+  it('reports a session that is still starting without failing', async () => {
+    const { query } = sessionSetup({ settled: 'unknown', totalMs: 30 });
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"w1", kind:"claude", name:"claude-2") { paneId ready } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startSession).toEqual({ paneId: 'w1:p9', ready: false });
+  });
+  it('reports an agent that stops at a question after starting', async () => {
+    const { query } = sessionSetup({ settled: 'blocked' });
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"w1", kind:"claude", name:"claude-2") { paneId } }',
+    );
+    expect(body.errors[0].extensions).toMatchObject({
+      code: 'agent_not_ready',
+      paneId: 'w1:p9',
+    });
+  });
+  it('waits for the new shell to finish its startup scripts', async () => {
+    const { query, calls } = sessionSetup({ shellBusyPolls: 3 });
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"w1", kind:"claude", name:"claude-2") { paneId } }',
+    );
+    expect(body.errors).toBeUndefined();
+    const methods = calls.map((c) => c.method);
+    expect(methods.filter((m) => m === 'pane.process_info')).toHaveLength(4);
+    expect(methods.slice(-2)).toEqual(['agent.start', 'agent.get']);
+  });
+  it('reports an agent waiting for input during startup', async () => {
+    const { query } = sessionSetup({ failStart: 'blocked' });
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"w1", kind:"claude", name:"claude-2") { paneId } }',
+    );
+    expect(body.errors[0].extensions).toMatchObject({
+      code: 'agent_not_ready',
+      paneId: 'w1:p9',
+    });
+    expect(body.errors[0].message).toContain('waiting for input');
+  });
+  it('lets Herdr choose the folder when the project has none', async () => {
+    const { query, calls } = sessionSetup();
+    await query(
+      'mutation { startSession(workspaceId:"w3", kind:"codex", name:"codex-1") { paneId } }',
+    );
+    expect(calls[1]?.params).toEqual({
+      workspace_id: 'w3',
+      label: 'codex-1',
+      focus: false,
+    });
+  });
+  it('validates new sessions before opening a tab', async () => {
+    const { query, calls } = sessionSetup();
+    for (const operation of [
+      'mutation { startSession(workspaceId:"w1", kind:"claude", name:"Bad Name") { paneId } }',
+      'mutation { startSession(workspaceId:"w1", kind:"rm -rf", name:"ok") { paneId } }',
+      'mutation { startSession(workspaceId:"", kind:"claude", name:"ok") { paneId } }',
+    ]) {
+      const { body } = await query(operation);
+      expect(body.errors?.[0].extensions.code).toBe('BAD_USER_INPUT');
+    }
+    expect(calls).toHaveLength(0);
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"gone", kind:"claude", name:"ok") { paneId } }',
+    );
+    expect(body.errors?.[0].extensions.code).toBe('BAD_USER_INPUT');
+    expect(calls.map((c) => c.method)).toEqual(['session.snapshot']);
+  });
+  it('reports the opened pane when the agent fails to start', async () => {
+    const { query, calls } = sessionSetup({ failStart: 'missing' });
+    const { body } = await query(
+      'mutation { startSession(workspaceId:"w1", kind:"claude", name:"claude-2") { paneId } }',
+    );
+    expect(body.errors[0].extensions).toMatchObject({
+      code: 'agent_not_found',
+      paneId: 'w1:p9',
+      tabId: 'w1:t9',
+    });
+    expect(body.errors[0].message).toContain('claude is not installed');
+    expect(calls.map((c) => c.method)).toEqual([
+      'session.snapshot',
+      'tab.create',
+      'pane.process_info',
+      'agent.start',
     ]);
   });
   it('rejects excessive query complexity and batched operations', async () => {

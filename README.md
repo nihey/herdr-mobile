@@ -1,6 +1,6 @@
 # Herdr Mobile
 
-An Expo Android companion for [Herdr](https://github.com/herdrdev/herdr). Check agent status, read terminal output, send prompts, respond to approval screens with terminal keys, and start agents in existing available panes. Discover Tailscale devices and save multiple independently paired machines.
+An Expo Android companion for [Herdr](https://github.com/herdrdev/herdr). Check agent status, read terminal output, send prompts, respond to approval screens with terminal keys, and start new agent sessions in projects open in Herdr. Discover Tailscale devices and save multiple independently paired machines.
 
 The Android app is named **Herd Remote** (package `io.github.nihey.herdremote`). It is an unofficial companion and is not affiliated with the Herdr project.
 
@@ -113,7 +113,8 @@ Native projects are generated from `mobile/app.json`. Do not edit generated Andr
 
 ## Using the app
 
-- **Agents:** filter by workspace or directory/name, see working/idle/done/needs-input state, and tap an agent to inspect its terminal. Status is Herdr's detection; inspect the screen before acting on an unexpected question.
+- **Agents:** agents that need input are listed first. Filter by workspace, by directory/name, or tap the Total / Working / Need input counters; tap an agent to inspect its terminal. Status is Herdr's detection; inspect the screen before acting on an unexpected question.
+- **New session:** tap **New session**, pick a project open in Herdr, pick the agent (defaults to the one you use there) and optionally type or dictate a first task. Herdr opens a new tab in that project's folder on your computer (your screen there doesn't switch), starts the agent and waits until it is ready (up to about 40 seconds), then the app sends the first task and opens the terminal. Existing agents are untouched. The agent CLI must be installed on that computer. If the agent is still starting or delivery is uncertain, the task stays in the terminal's text box instead of being sent. Requires the 0.4.0 bridge: rebuild and restart it after updating.
 - **Recent / Screen:** choose unwrapped recent output or the current rendered terminal screen. Select/copy terminal text. Scrolling up freezes the text where you are reading (**PAUSED**) while the agent keeps working; the pill counts new lines. Tap it or scroll to the bottom to resume following.
 - **Prompt:** explicitly sends the text plus Enter. **Type text:** writes literal terminal text without Enter, useful for interactive responses. Use the key toolbar to finish a reply or navigate a question. The app does not automatically answer approvals.
 - **Dictation:** tap the mic beside the composer and speak; words appear in the draft as you talk. Tap ■ to stop, review, then send. Nothing is sent automatically. The **EN/PT** chip picks English or Brazilian Portuguese before you speak and is remembered. Recognition runs only on the phone through Android's on-device speech engine (Android 13+); the first use of each language offers Android's one-time offline model download. Audio and transcripts never go to the bridge or any cloud service.
@@ -140,7 +141,7 @@ npm run export:android -w mobile
 
 Tests exercise socket framing, daemon errors, correlation, disconnect/timeout handling, size limits, authentication before daemon access, GraphQL mapping/validation, and URL normalization. Mutation tests use a fake socket or an isolated test session, never existing user agents.
 
-`npm run integration` requires the installed `herdr` executable. It creates a unique disposable named server, exercises GraphQL snapshot/input/keys/output end to end, and stops only that test server.
+`npm run integration` requires the installed `herdr` executable. It creates a unique disposable named server, exercises GraphQL snapshot/input/keys/output and a new session (tab → agent start → first task) end to end, and stops only that test server. The "agent" is a stand-in `codex` script on a plain `/bin/sh` PATH; the test refuses to start or prompt anything unless the stand-in is what runs, so no real agent CLI or AI provider is used.
 
 ## Troubleshooting
 

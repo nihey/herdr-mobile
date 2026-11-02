@@ -116,3 +116,29 @@ export const START = gql`
     }
   }
 `;
+// Fetched only by the New session sheet, so an older bridge without these
+// fields still serves the agent list.
+export const NEW_SESSION_OPTIONS = gql`
+  query NewSessionOptions {
+    agentKinds
+    session {
+      workspaces {
+        id
+        label
+        cwd
+      }
+    }
+  }
+`;
+export const START_SESSION = gql`
+  mutation StartSession($workspaceId: ID!, $kind: String!, $name: String!) {
+    startSession(workspaceId: $workspaceId, kind: $kind, name: $name) {
+      paneId
+      tabId
+      workspaceId
+      name
+      kind
+      ready
+    }
+  }
+`;

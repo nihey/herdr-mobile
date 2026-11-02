@@ -10,7 +10,13 @@ export function usePoll<T>(load: () => Promise<T>, interval: number) {
   const [error, setError] = useState<unknown>();
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
+  // True from a user pull until its read completes; refresh() stays silent.
+  const [refreshing, setRefreshing] = useState(false);
   const refresh = useCallback(() => setRevision((r) => r + 1), []);
+  const pull = useCallback(() => {
+    setRefreshing(true);
+    setRevision((r) => r + 1);
+  }, []);
   useEffect(() => {
     if (!focused) return;
     let disposed = false;
@@ -36,6 +42,7 @@ export function usePoll<T>(load: () => Promise<T>, interval: number) {
         inFlight = false;
         if (!disposed) {
           setLoading(false);
+          setRefreshing(false);
           timer = setTimeout(poll, Math.min(interval * 2 ** failures, 30000));
         }
       }
@@ -51,5 +58,5 @@ export function usePoll<T>(load: () => Promise<T>, interval: number) {
       listener.remove();
     };
   }, [focused, interval, revision, load]);
-  return { data, error, loading, refresh };
+  return { data, error, loading, refreshing, refresh, pull };
 }

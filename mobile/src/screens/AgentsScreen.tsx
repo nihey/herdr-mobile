@@ -7,8 +7,8 @@ import {
   View,
 } from 'react-native';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ArrowUpRight,
   ChevronRight,
   CircleHelp,
   Code,
@@ -26,6 +26,7 @@ import { useSession } from '@/lib/session-context';
 import { useSnapshot } from '@/hooks/useSnapshot';
 import type { Pane } from '@/lib/types';
 import { errorMessage } from '@/lib/errors';
+import { attentionOrder, cleanTitle, shortPath } from '@/lib/sessions';
 import {
   Button,
   c,
@@ -40,6 +41,9 @@ import {
   Status,
 } from '@/components/ui';
 import { StartAgentModal } from './StartAgentModal';
+import { NewSessionSheet } from './NewSessionSheet';
+
+type StatusFilter = 'working' | 'blocked' | null;
 
 const kindIconMap: Record<string, React.FC<{ size: number; color: string }>> = {
   codex: Code,
@@ -65,9 +69,12 @@ function KindIcon({
 
 export function AgentsScreen() {
   const { connection, activeMachine, forget, busy } = useSession();
-  const { data, error, loading, refresh } = useSnapshot();
+  const { data, error, loading, refreshing, refresh, pull } = useSnapshot();
+  const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
   const [workspace, setWorkspace] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(null);
+  const [newSession, setNewSession] = useState(false);
   const [settings, setSettings] = useState(false);
   const [help, setHelp] = useState(false);
   const [forgetError, setForgetError] = useState('');
@@ -75,13 +82,25 @@ export function AgentsScreen() {
   const matches = (workspaceId: string, content: string) =>
     (!workspace || workspace === workspaceId) &&
     content.toLowerCase().includes(search.toLowerCase());
-  const agents =
-    data?.agents.filter((agent) =>
-      matches(
-        agent.workspaceId,
-        [agent.name, agent.kind, agent.cwd, agent.title].join(' '),
-      ),
-    ) ?? [];
+  const workspaceLabel = (id: string) =>
+    data?.workspaces.find((item) => item.id === id)?.label ?? id;
+  const agents = attentionOrder(
+    data?.agents.filter(
+      (agent) =>
+        (!statusFilter || agent.status === statusFilter) &&
+        matches(
+          agent.workspaceId,
+          [
+            agent.name,
+            agent.kind,
+            agent.cwd,
+            agent.title,
+            workspaceLabel(agent.workspaceId),
+          ].join(' '),
+        ),
+    ) ?? [],
+  );
+  const filtered = !!(search || workspace || statusFilter);
   const panes =
     data?.panes.filter(
       (pane) =>
@@ -89,17 +108,24 @@ export function AgentsScreen() {
         matches(pane.workspaceId, [pane.label, pane.cwd, pane.title].join(' ')),
     ) ?? [];
   const connected = !!data && !error;
-  const workspaceLabel = (id: string) =>
-    data?.workspaces.find((item) => item.id === id)?.label ?? id;
+  const openTerminal = (paneId: string, raw = false) =>
+    router.push({
+      pathname: '/agent/[paneId]',
+      params: {
+        paneId,
+        ...(raw ? { raw: '1' } : {}),
+        machineId: activeMachine?.id,
+      },
+    });
   return (
     <Screen>
       <ScrollView
-        contentContainerStyle={[s.page, { paddingTop: 18 }]}
+        contentContainerStyle={[s.page, { paddingTop: 18, paddingBottom: 110 }]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
-            refreshing={loading}
-            onRefresh={refresh}
+            refreshing={refreshing}
+            onRefresh={pull}
             tintColor={c.accent}
             colors={[c.accent]}
           />
@@ -107,9 +133,9 @@ export function AgentsScreen() {
       >
         <View style={s.between}>
           <View style={s.row}>
-            <GitFork size={25} color={c.accent} />
-            <Text style={[s.heading, { fontSize: 25, letterSpacing: -1 }]}>
-              herdr
+            <GitFork size={23} color={c.accent} />
+            <Text style={[s.heading, { fontSize: 22, letterSpacing: -0.8 }]}>
+              Herd Remote
             </Text>
           </View>
           <IconButton
@@ -162,43 +188,95 @@ export function AgentsScreen() {
                 borderBottomWidth: 1,
                 borderTopWidth: 1,
                 borderColor: c.line,
-                paddingVertical: 17,
+                paddingTop: 17,
+                paddingBottom: 13,
               },
             ]}
           >
-            {[
-              { label: 'TOTAL', count: data.agents.length, color: c.text },
-              {
-                label: 'WORKING',
-                count: data.agents.filter((a) => a.status === 'working').length,
-                color: c.accent,
-              },
-              {
-                label: 'NEED INPUT',
-                count: data.agents.filter((a) => a.status === 'blocked').length,
-                color: c.amber,
-              },
-            ].map((item, i) => (
-              <View
-                key={item.label}
-                style={{
-                  flex: 1,
-                  paddingLeft: i ? 18 : 0,
-                  borderLeftWidth: i ? 1 : 0,
-                  borderColor: c.line,
-                  gap: 4,
-                }}
-              >
-                <Text
-                  style={{ fontSize: 28, color: item.color, fontWeight: '500' }}
+            {(
+              [
+                {
+                  label: 'TOTAL',
+                  filter: null,
+                  count: data.agents.length,
+                  color: c.text,
+                },
+                {
+                  label: 'WORKING',
+                  filter: 'working',
+                  count: data.agents.filter((a) => a.status === 'working')
+                    .length,
+                  color: c.accent,
+                },
+                {
+                  label: 'NEED INPUT',
+                  filter: 'blocked',
+                  count: data.agents.filter((a) => a.status === 'blocked')
+                    .length,
+                  color: c.amber,
+                },
+              ] as const
+            ).map((item, i) => {
+              const selected = statusFilter === item.filter;
+              return (
+                <Pressable
+                  key={item.label}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    item.filter
+                      ? `Show only ${item.label.toLowerCase()}, ${item.count}`
+                      : `Show all agents, ${item.count}`
+                  }
+                  accessibilityState={{ selected }}
+                  onPress={() =>
+                    setStatusFilter(
+                      item.filter === statusFilter ? null : item.filter,
+                    )
+                  }
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    paddingLeft: i ? 18 : 0,
+                    borderLeftWidth: i ? 1 : 0,
+                    borderColor: c.line,
+                    gap: 4,
+                    opacity: pressed ? 0.6 : 1,
+                  })}
                 >
-                  {String(item.count).padStart(2, '0')}
-                </Text>
-                <Text style={[s.eyebrow, { fontSize: 9, letterSpacing: 1 }]}>
-                  {item.label}
-                </Text>
-              </View>
-            ))}
+                  <Text
+                    style={{
+                      fontSize: 28,
+                      color: item.color,
+                      fontWeight: '500',
+                    }}
+                  >
+                    {String(item.count).padStart(2, '0')}
+                  </Text>
+                  <Text
+                    style={[
+                      s.eyebrow,
+                      {
+                        fontSize: 9,
+                        letterSpacing: 1,
+                        color: selected ? item.color : c.muted,
+                      },
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                  <View
+                    style={{
+                      height: 2,
+                      width: 22,
+                      borderRadius: 1,
+                      backgroundColor:
+                        selected && data.agents.length
+                          ? item.color
+                          : 'transparent',
+                    }}
+                  />
+                </Pressable>
+              );
+            })}
           </View>
         )}
         {!!error && <Notice message={errorMessage(error)} danger />}
@@ -255,103 +333,96 @@ export function AgentsScreen() {
                 <Text style={s.muted}>Status guide</Text>
               </Pressable>
             </View>
-            {agents.map((agent) => (
-              <Pressable
-                key={agent.paneId}
-                accessibilityRole="button"
-                accessibilityLabel={`Open ${agent.name ?? agent.kind ?? 'agent'}, ${agent.status}`}
-                onPress={() =>
-                  router.push({
-                    pathname: '/agent/[paneId]',
-                    params: {
-                      paneId: agent.paneId,
-                      machineId: activeMachine?.id,
+            {agents.map((agent) => {
+              const project = workspaceLabel(agent.workspaceId);
+              const heading = agent.name ?? project;
+              const task = cleanTitle(agent.title);
+              const meta = [
+                agent.kind ?? 'agent',
+                agent.name ? project : null,
+                shortPath(agent.cwd),
+              ]
+                .filter(Boolean)
+                .join(' · ');
+              return (
+                <Pressable
+                  key={agent.paneId}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${heading}, ${agent.kind ?? 'agent'}, ${agent.status === 'blocked' ? 'needs input' : agent.status}`}
+                  onPress={() => openTerminal(agent.paneId)}
+                  style={({ pressed }) => [
+                    s.card,
+                    {
+                      padding: 14,
+                      gap: 7,
+                      opacity: pressed ? 0.7 : 1,
+                      borderLeftWidth: 3,
+                      borderLeftColor:
+                        agent.status === 'blocked'
+                          ? c.amber
+                          : agent.status === 'working'
+                            ? c.accent
+                            : c.line,
                     },
-                  })
-                }
-                style={({ pressed }) => [
-                  s.card,
-                  {
-                    opacity: pressed ? 0.7 : 1,
-                    borderLeftWidth: 3,
-                    borderLeftColor:
-                      agent.status === 'blocked'
-                        ? c.amber
-                        : agent.status === 'working'
-                          ? c.accent
-                          : c.line,
-                  },
-                ]}
-              >
-                <View style={s.between}>
-                  <View style={[s.row, { flex: 1, gap: 10 }]}>
-                    <View
-                      style={{
-                        width: 35,
-                        height: 35,
-                        backgroundColor: c.elevated,
-                        borderRadius: 10,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <KindIcon kind={agent.kind} size={17} color={c.accent} />
-                    </View>
-                    <View style={{ flex: 1, gap: 2 }}>
-                      <Text
-                        numberOfLines={1}
-                        style={[s.heading, { fontSize: 17 }]}
-                      >
-                        {agent.name ?? agent.title ?? agent.kind ?? 'Agent'}
-                      </Text>
-                      <Text style={[s.muted, { fontSize: 11 }]}>
-                        {agent.kind ?? 'Agent'} ·{' '}
-                        {workspaceLabel(agent.workspaceId)}
-                      </Text>
-                    </View>
-                  </View>
-                  <Status status={agent.status} />
-                </View>
-                <Text
-                  numberOfLines={1}
-                  ellipsizeMode="middle"
-                  style={[s.muted, { fontFamily: mono, fontSize: 11 }]}
-                >
-                  {agent.cwd ?? agent.paneId}
-                </Text>
-                <View
-                  style={[
-                    s.between,
-                    { borderTopWidth: 1, borderColor: c.line, paddingTop: 11 },
                   ]}
                 >
+                  <View style={s.between}>
+                    <View style={[s.row, { flex: 1, gap: 10 }]}>
+                      <View
+                        style={{
+                          width: 30,
+                          height: 30,
+                          backgroundColor: c.elevated,
+                          borderRadius: 9,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <KindIcon
+                          kind={agent.kind}
+                          size={15}
+                          color={c.accent}
+                        />
+                      </View>
+                      <Text
+                        numberOfLines={1}
+                        style={[s.heading, { fontSize: 16, flex: 1 }]}
+                      >
+                        {heading}
+                      </Text>
+                    </View>
+                    <Status status={agent.status} />
+                  </View>
+                  {!!task && (
+                    <Text
+                      numberOfLines={1}
+                      style={{ color: c.text, fontSize: 13, lineHeight: 18 }}
+                    >
+                      {task}
+                    </Text>
+                  )}
                   <Text
                     numberOfLines={1}
-                    style={[s.muted, { fontSize: 11, flex: 1 }]}
+                    ellipsizeMode="middle"
+                    style={[
+                      s.muted,
+                      { fontFamily: mono, fontSize: 10, lineHeight: 14 },
+                    ]}
                   >
-                    {agent.status === 'blocked'
-                      ? 'Waiting for your response'
-                      : agent.status === 'working'
-                        ? 'At work on your computer'
-                        : agent.status === 'done'
-                          ? 'Ready for your next step'
-                          : 'Open terminal to pick up the thread'}
+                    {meta}
                   </Text>
-                  <ArrowUpRight size={16} color={c.muted} />
-                </View>
-              </Pressable>
-            ))}
+                </Pressable>
+              );
+            })}
             {!agents.length && (
               <View style={s.card}>
                 <Text style={s.heading}>
-                  {search || workspace
-                    ? 'No matching agents'
-                    : 'Room for your next idea.'}
+                  {filtered ? 'No matching agents' : 'Room for your next idea.'}
                 </Text>
                 <Text style={s.muted}>
-                  {search || workspace
-                    ? 'Try another search or workspace.'
-                    : 'Your running Herdr agents appear here. Start one in an available terminal below.'}
+                  {filtered
+                    ? 'Try another search, status or workspace.'
+                    : 'Your running Herdr agents appear here. Tap New session to start one in a project.'}
                 </Text>
               </View>
             )}
@@ -364,16 +435,7 @@ export function AgentsScreen() {
                   <View key={pane.id} style={[s.card, { padding: 14 }]}>
                     <Pressable
                       accessibilityRole="button"
-                      onPress={() =>
-                        router.push({
-                          pathname: '/agent/[paneId]',
-                          params: {
-                            paneId: pane.id,
-                            raw: '1',
-                            machineId: activeMachine?.id,
-                          },
-                        })
-                      }
+                      onPress={() => openTerminal(pane.id, true)}
                       style={s.between}
                     >
                       <View style={{ flex: 1, gap: 5 }}>
@@ -411,6 +473,46 @@ export function AgentsScreen() {
           </>
         )}
       </ScrollView>
+      {!!data?.workspaces.length && (
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            right: 20,
+            // Absolute children ignore the safe-area padding; clear the nav bar.
+            bottom: insets.bottom + 16,
+          }}
+        >
+          <Button
+            title="New session"
+            accessibilityLabel="Start a new session in a project"
+            icon={<Plus size={18} color={c.ink} />}
+            onPress={() => setNewSession(true)}
+            style={{
+              borderRadius: 18,
+              paddingHorizontal: 20,
+              minHeight: 54,
+              elevation: 6,
+              shadowColor: '#000',
+              shadowOpacity: 0.4,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 6 },
+            }}
+          />
+        </View>
+      )}
+      {newSession && data && (
+        <NewSessionSheet
+          agents={data.agents}
+          initialWorkspaceId={workspace}
+          onClose={() => setNewSession(false)}
+          onOpen={(paneId, raw) => {
+            setNewSession(false);
+            refresh();
+            openTerminal(paneId, raw);
+          }}
+        />
+      )}
       {startPane && (
         <StartAgentModal
           pane={startPane}

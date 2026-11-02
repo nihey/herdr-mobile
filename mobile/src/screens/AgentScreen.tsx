@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   ScrollView,
@@ -16,6 +16,7 @@ import { useDictation } from '@/hooks/useDictation';
 import { KEYS, OUTPUT, PROMPT, SEND_TEXT } from '@/lib/graphql';
 import { errorMessage } from '@/lib/errors';
 import { newLineCount } from '@/lib/terminal';
+import { clearHandoff, peekHandoff } from '@/lib/handoff';
 import { languageInfo } from '@/lib/dictation';
 import type { Output } from '@/lib/types';
 import {
@@ -65,16 +66,23 @@ function timeSinceLabel(date: string | undefined): string {
 
 export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
   useHomeBack();
-  const { client } = useSession();
+  const { client, activeMachine } = useSession();
+  // A first task from New session that may not have arrived comes back as
+  // the draft, with a notice to check the terminal before resending.
+  const handoffKey = `${activeMachine?.id}/${paneId}`;
+  const [handoff] = useState(() => peekHandoff(handoffKey));
+  useEffect(() => clearHandoff(handoffKey), [handoffKey]);
   const snapshot = useSnapshot();
   const agent = snapshot.data?.agents.find((item) => item.paneId === paneId);
   const pane = snapshot.data?.panes.find((item) => item.id === paneId);
 
   const [source, setSource] = useState<Source>('RECENT');
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(handoff?.draft ?? '');
   const [typeText, setTypeText] = useState(raw);
   const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(
+    handoff?.notice ?? null,
+  );
   const [sent, setSent] = useState('');
   // Output shown while the reader is scrolled up; null follows the live output.
   const [frozen, setFrozen] = useState<string | null>(null);

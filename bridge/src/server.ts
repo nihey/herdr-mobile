@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { GraphQLError, NoSchemaIntrospectionCustomRule, visit } from 'graphql';
 import { createYoga, type Plugin } from 'graphql-yoga';
-import { buildSchema, type RequestHerdr } from './schema.js';
+import { buildSchema, type RequestHerdr, type StartTiming } from './schema.js';
 import type { DiscoveredMachine } from './discovery.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
@@ -19,6 +19,7 @@ export function createBridge(options: {
   token: string;
   request: RequestHerdr;
   discover?: () => Promise<DiscoveredMachine[]>;
+  startTiming?: StartTiming;
 }) {
   if (options.token.length < 32)
     throw new Error('Bridge token must contain at least 32 characters.');
@@ -45,7 +46,7 @@ export function createBridge(options: {
     },
   };
   const yoga = createYoga({
-    schema: buildSchema(options.request, options.discover),
+    schema: buildSchema(options.request, options.discover, options.startTiming),
     graphqlEndpoint: '/graphql',
     graphiql: false,
     landingPage: false,

@@ -34,6 +34,9 @@ export class HerdrClient {
       const mutation = ![
         'ping',
         'session.snapshot',
+        'server.agent_manifests',
+        'pane.process_info',
+        'agent.get',
         'agent.list',
         'agent.read',
         'pane.read',

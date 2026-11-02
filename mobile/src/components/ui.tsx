@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -390,7 +391,10 @@ export function Sheet({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <View
+      {/* Edge-to-edge Android does not resize for the keyboard; pad instead so
+          fields and buttons in the sheet stay above it. */}
+      <KeyboardAvoidingView
+        behavior="padding"
         style={{
           flex: 1,
           backgroundColor: '#00000099',
@@ -423,7 +427,7 @@ export function Sheet({
             {children}
           </ScrollView>
         </SafeAreaView>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

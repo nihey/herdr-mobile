@@ -1,5 +1,13 @@
 # Verification — October 15, 2026
 
+## Version 0.4.0: new sessions and home UX — November 2, 2026
+
+- Lint, TypeScript and 86 tests pass (bridge startSession: project folder, unfocused labelled tab, shell wait, readiness, blocked/exited/missing agents, duplicate names, optional checks; app helpers for kinds, names, ordering, titles and draft handoff).
+- `npm run integration` against Herdr 0.9.4 in a disposable named server: a `/bin/sh` startup script that runs a child for one second, a stand-in `codex` verified to be what runs, then startSession → new tab in the workspace folder with the agent name as label → `ready: true` → first task echoed by the stand-in.
+- Release APK 0.4.0 (code 4) on the `herdr-mobile-test` emulator, paired with an isolated test bridge on a disposable session (stand-in claude/codex only; system-only PATH, so no real agent CLI could start). Checked: Herd Remote branding; needs-input agent listed first; compact cards with terminal titles; counters as filters; New session → project list → Claude preselected for a Claude project → generated name → first task → the terminal opened with the task delivered; the new tab stayed unfocused and the existing agent was untouched; the sheet stays above the keyboard; the button clears the navigation bar.
+- Missing CLI (`gemini` not on PATH): the bridge reports "exited right after launching" in about 3 s with the opened pane; the sheet offers **Open the new terminal**, which shows `gemini: not found` with the typed task kept as the draft.
+- Not checked on a physical phone or against the real Claude/Codex CLIs: their readiness timing comes from Herdr's own detection, which the stand-ins only approximate.
+
 ## Version 0.3.0: terminal reading, keyboard and dictation
 
 - Lint, TypeScript and 63 tests pass, including new suites for paused-output line counting (`terminal.ts`) and dictation text/language helpers (`dictation.ts`). Expo Doctor: 20/21; the config-schema check could not reach exp.host from this machine.

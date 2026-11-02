@@ -38,3 +38,12 @@ export type DiscoveredMachine = {
   online: boolean;
   self: boolean;
 };
+export type Project = { id: string; label: string; cwd: string | null };
+export type StartedSession = {
+  paneId: string;
+  tabId: string;
+  workspaceId: string;
+  name: string;
+  kind: string;
+  ready: boolean;
+};
