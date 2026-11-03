@@ -20,6 +20,8 @@ export function createBridge(options: {
   request: RequestHerdr;
   discover?: () => Promise<DiscoveredMachine[]>;
   startTiming?: StartTiming;
+  /** The home folder for home terminals; defaults to the user's home. */
+  homeDir?: string;
 }) {
   if (options.token.length < 32)
     throw new Error('Bridge token must contain at least 32 characters.');
@@ -46,7 +48,12 @@ export function createBridge(options: {
     },
   };
   const yoga = createYoga({
-    schema: buildSchema(options.request, options.discover, options.startTiming),
+    schema: buildSchema(
+      options.request,
+      options.discover,
+      options.startTiming,
+      options.homeDir,
+    ),
     graphqlEndpoint: '/graphql',
     graphiql: false,
     landingPage: false,

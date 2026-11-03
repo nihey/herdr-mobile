@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import { GraphQLError } from 'graphql';
 import { createSchema } from 'graphql-yoga';
@@ -44,6 +45,8 @@ const keysAllowed = new Set([
   'n',
 ]);
 const field = (key: string) => (parent: RecordValue) => parent[key];
+/** The workspace that holds terminals and sessions started in the home folder. */
+export const HOME_WORKSPACE_LABEL = 'phone';
 const namePattern = /^[a-z][a-z0-9_-]{0,31}$/;
 function agentName(value: string) {
   if (!namePattern.test(value))
@@ -63,6 +66,10 @@ type Snapshot = {
 } & RecordValue;
 const nonEmpty = (value: unknown) =>
   typeof value === 'string' && value ? value : null;
+const missingTab = () =>
+  new GraphQLError('Herdr did not report the new tab.', {
+    extensions: { code: 'BRIDGE_ERROR' },
+  });
 /** A project's folder: the shell directory of the workspace's first pane. */
 function projectCwd(snapshot: Snapshot, workspaceId: unknown) {
   const pane = snapshot.panes?.find((p) => p.workspace_id === workspaceId);
@@ -94,6 +101,7 @@ export function buildSchema(
   request: RequestHerdr,
   discover?: () => Promise<DiscoveredMachine[]>,
   timing: StartTiming = defaultStartTiming,
+  homeDir: string = homedir(),
 ) {
   async function call(
     method: string,
@@ -132,21 +140,75 @@ export function buildSchema(
    * A new tab's shell runs its startup scripts first, and Herdr only starts an
    * agent once the shell idles alone at its prompt. Wait for that (read-only)
    * instead of retrying agent.start; on timeout agent.start reports the state.
+   * True once settled at the prompt, false on timeout, null when the platform
+   * cannot report the pane's processes.
    */
   async function waitForShell(paneId: string) {
     const deadline = Date.now() + timing.shellTimeoutMs;
     let idleSince: number | null = null;
     while (Date.now() < deadline) {
       const alone = await shellAlone(paneId);
-      // Optional check: agent.start reports the pane's real state.
-      if (alone === null) return;
+      if (alone === null) return null;
       if (!alone) idleSince = null;
       else {
         idleSince ??= Date.now();
-        if (Date.now() - idleSince >= timing.settleMs) return;
+        if (Date.now() - idleSince >= timing.settleMs) return true;
       }
       await delay(timing.pollMs);
     }
+    return false;
+  }
+  /**
+   * Where a new tab goes: an open project in its folder, or (no workspace) the
+   * home workspace in the home folder. The home workspace is found by label
+   * alone: Herdr workspaces have no folder of their own and a shell's folder
+   * changes with every cd. Creating it opens its first pane, which the caller
+   * uses instead of a new tab. Never retried.
+   */
+  async function placement(snapshot: Snapshot, workspaceId: string | null) {
+    if (workspaceId !== null) {
+      if (!snapshot.workspaces?.some((w) => w.workspace_id === workspaceId))
+        badInput(
+          'That project is no longer open in Herdr. Refresh and choose another.',
+        );
+      return { workspaceId, cwd: projectCwd(snapshot, workspaceId) };
+    }
+    const home = snapshot.workspaces?.find(
+      (w) => w.label === HOME_WORKSPACE_LABEL,
+    );
+    const homeId = nonEmpty(home?.workspace_id);
+    if (homeId) return { workspaceId: homeId, cwd: homeDir };
+    const created = await call('workspace.create', {
+      label: HOME_WORKSPACE_LABEL,
+      cwd: homeDir,
+      focus: false,
+    });
+    const createdId = nonEmpty(
+      (created.workspace as RecordValue | undefined)?.workspace_id,
+    );
+    const paneId = nonEmpty(
+      (created.root_pane as RecordValue | undefined)?.pane_id,
+    );
+    const tabId = nonEmpty((created.tab as RecordValue | undefined)?.tab_id);
+    if (!createdId || !paneId || !tabId) throw missingTab();
+    return { workspaceId: createdId, cwd: homeDir, opened: { paneId, tabId } };
+  }
+  /** Open a new unfocused tab (every existing pane stays untouched). */
+  async function openTab(
+    place: Awaited<ReturnType<typeof placement>>,
+    label: string,
+  ) {
+    if (place.opened) return place.opened;
+    const created = await call('tab.create', {
+      workspace_id: place.workspaceId,
+      label,
+      focus: false,
+      ...(place.cwd ? { cwd: place.cwd } : {}),
+    });
+    const paneId = nonEmpty((created.root_pane as RecordValue)?.pane_id);
+    const tabId = nonEmpty((created.tab as RecordValue)?.tab_id);
+    if (!paneId || !tabId) throw missingTab();
+    return { paneId, tabId };
   }
   /**
    * agent.start returns once the launch is queued, before the agent accepts
@@ -243,6 +305,13 @@ export function buildSchema(
         "False when the agent had not finished starting within the time limit."
         ready: Boolean!
       }
+      type StartedTerminal {
+        paneId: ID!
+        tabId: ID!
+        workspaceId: ID!
+        "True once the shell sat alone at its prompt; false if that is unknown."
+        ready: Boolean!
+      }
       type DiscoveredMachine {
         id: ID!
         name: String!
@@ -256,6 +325,8 @@ export function buildSchema(
         discoveredMachines: [DiscoveredMachine!]!
         session: Session!
         agentKinds: [String!]!
+        "The bridge user's home folder, where home terminals open."
+        homeFolder: String
         output(
           target: ID!
           source: OutputSource = RECENT
@@ -272,11 +343,14 @@ export function buildSchema(
         ): ActionResult!
         sendText(paneId: ID!, text: String!): ActionResult!
         startAgent(paneId: ID!, name: String!, kind: String!): ActionResult!
+        "Without a workspace, starts in the home workspace."
         startSession(
-          workspaceId: ID!
+          workspaceId: ID
           kind: String!
           name: String!
         ): StartedSession!
+        "A plain shell in a new tab. Without a workspace, in the home workspace."
+        startTerminal(workspaceId: ID): StartedTerminal!
       }
     `,
     resolvers: {
@@ -325,6 +399,7 @@ export function buildSchema(
             );
           return [...new Set(kinds)];
         },
+        homeFolder: () => homeDir,
         output: async (
           _: unknown,
           args: { target: string; source: string; lines: number; raw: boolean },
@@ -399,18 +474,18 @@ export function buildSchema(
         },
         startSession: async (
           _: unknown,
-          args: { workspaceId: string; name: string; kind: string },
+          args: { workspaceId?: string | null; name: string; kind: string },
         ) => {
-          target(args.workspaceId);
+          const workspaceId = args.workspaceId ?? null;
+          if (workspaceId !== null) target(workspaceId);
           agentName(args.name);
           agentKind(args.kind);
           const startedAt = Date.now();
           const snapshot = (await call('session.snapshot'))
             .snapshot as Snapshot;
           if (
-            !snapshot.workspaces?.some(
-              (w) => w.workspace_id === args.workspaceId,
-            )
+            workspaceId !== null &&
+            !snapshot.workspaces?.some((w) => w.workspace_id === workspaceId)
           )
             badInput(
               'That project is no longer open in Herdr. Refresh and choose another.',
@@ -419,21 +494,10 @@ export function buildSchema(
             badInput(
               `Another agent is already named ${args.name}. Choose a different name.`,
             );
-          const cwd = projectCwd(snapshot, args.workspaceId);
           // A new tab leaves every existing pane alone and does not move the
           // desktop view. Never retried: a failure here may still have opened it.
-          const created = await call('tab.create', {
-            workspace_id: args.workspaceId,
-            label: args.name,
-            focus: false,
-            ...(cwd ? { cwd } : {}),
-          });
-          const paneId = nonEmpty((created.root_pane as RecordValue)?.pane_id);
-          const tabId = nonEmpty((created.tab as RecordValue)?.tab_id);
-          if (!paneId || !tabId)
-            throw new GraphQLError('Herdr did not report the new tab.', {
-              extensions: { code: 'BRIDGE_ERROR' },
-            });
+          const place = await placement(snapshot, workspaceId);
+          const { paneId, tabId } = await openTab(place, args.name);
           await waitForShell(paneId);
           const failed = (error: unknown) => {
             const known = error instanceof HerdrError;
@@ -483,11 +547,25 @@ export function buildSchema(
           return {
             paneId,
             tabId,
-            workspaceId: args.workspaceId,
+            workspaceId: place.workspaceId,
             name: args.name,
             kind: args.kind,
             ready: state === 'ready',
           };
+        },
+        startTerminal: async (
+          _: unknown,
+          args: { workspaceId?: string | null },
+        ) => {
+          const workspaceId = args.workspaceId ?? null;
+          if (workspaceId !== null) target(workspaceId);
+          const snapshot = (await call('session.snapshot'))
+            .snapshot as Snapshot;
+          const place = await placement(snapshot, workspaceId);
+          const { paneId, tabId } = await openTab(place, 'terminal');
+          // Read-only: the app types the first command itself, only when ready.
+          const ready = (await waitForShell(paneId)) === true;
+          return { paneId, tabId, workspaceId: place.workspaceId, ready };
         },
       },
       Workspace: { id: field('workspace_id'), status: field('agent_status') },

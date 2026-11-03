@@ -66,6 +66,7 @@ function sessionSetup({
   manifestsFail = false,
   agentProcess = true,
   totalMs = 9000,
+  homeWorkspace = false,
 }: {
   failStart?: string;
   shellBusyPolls?: number;
@@ -76,6 +77,8 @@ function sessionSetup({
   /** Whether the launched CLI keeps running in the pane's foreground. */
   agentProcess?: boolean;
   totalMs?: number;
+  /** Whether a `phone` workspace (whose shell has left the home folder) exists. */
+  homeWorkspace?: boolean;
 } = {}) {
   let busyPolls = shellBusyPolls;
   let started = false;
@@ -86,6 +89,7 @@ function sessionSetup({
   }[] = [];
   const app = createBridge({
     token,
+    homeDir: '/home/tester',
     startTiming: {
       pollMs: 1,
       settleMs: 0,
@@ -128,6 +132,9 @@ function sessionSetup({
               { workspace_id: 'w1', label: 'API', agent_status: 'working' },
               { workspace_id: 'w2', label: 'Site', agent_status: 'idle' },
               { workspace_id: 'w3', label: 'Empty', agent_status: 'idle' },
+              ...(homeWorkspace
+                ? [{ workspace_id: 'w7', label: 'phone', agent_status: 'idle' }]
+                : []),
             ],
             tabs: [],
             agents: [
@@ -163,8 +170,26 @@ function sessionSetup({
                 foreground_cwd: '/work/site',
                 agent_status: 'idle',
               },
+              ...(homeWorkspace
+                ? [
+                    {
+                      pane_id: 'w7:p1',
+                      workspace_id: 'w7',
+                      tab_id: 'w7:t1',
+                      cwd: '/work/elsewhere',
+                      agent_status: 'idle',
+                    },
+                  ]
+                : []),
             ],
           },
+        };
+      if (method === 'workspace.create')
+        return {
+          type: 'workspace_created',
+          workspace: { workspace_id: 'w8', label: params.label },
+          tab: { tab_id: 'w8:t1', workspace_id: 'w8' },
+          root_pane: { pane_id: 'w8:p1' },
         };
       if (method === 'server.agent_manifests' && manifestsFail)
         throw new HerdrError('unavailable', 'manifests unavailable');
@@ -551,6 +576,107 @@ describe('authenticated GraphQL bridge', () => {
       label: 'codex-1',
       focus: false,
     });
+  });
+  it('reports the home folder', async () => {
+    const { query } = sessionSetup();
+    const { body } = await query('{ homeFolder }');
+    expect(body.errors).toBeUndefined();
+    expect(body.data.homeFolder).toBe('/home/tester');
+  });
+  it('opens a plain terminal in a new unfocused tab in the project folder', async () => {
+    const { query, calls } = sessionSetup();
+    const { body } = await query(
+      'mutation { startTerminal(workspaceId:"w1") { paneId tabId workspaceId ready } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startTerminal).toEqual({
+      paneId: 'w1:p9',
+      tabId: 'w1:t9',
+      workspaceId: 'w1',
+      ready: true,
+    });
+    expect(calls.map((c) => c.method)).toEqual([
+      'session.snapshot',
+      'tab.create',
+      'pane.process_info',
+    ]);
+    expect(calls[1]?.params).toEqual({
+      workspace_id: 'w1',
+      label: 'terminal',
+      focus: false,
+      cwd: '/work/api',
+    });
+    expect(
+      calls.some((c) => /^agent\.|send_text|send_keys/.test(c.method)),
+    ).toBe(false);
+  });
+  it('creates the phone workspace in the home folder for the first home terminal', async () => {
+    const { query, calls } = sessionSetup();
+    const { body } = await query(
+      'mutation { startTerminal { paneId tabId workspaceId ready } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startTerminal).toEqual({
+      paneId: 'w8:p1',
+      tabId: 'w8:t1',
+      workspaceId: 'w8',
+      ready: true,
+    });
+    expect(calls.find((c) => c.method === 'workspace.create')?.params).toEqual({
+      label: 'phone',
+      cwd: '/home/tester',
+      focus: false,
+    });
+    expect(calls.some((c) => c.method === 'tab.create')).toBe(false);
+  });
+  it("reuses the phone workspace whatever its panes' folders", async () => {
+    const { query, calls } = sessionSetup({ homeWorkspace: true });
+    const { body } = await query('mutation { startTerminal { workspaceId } }');
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startTerminal.workspaceId).toBe('w7');
+    expect(calls.some((c) => c.method === 'workspace.create')).toBe(false);
+    expect(calls.find((c) => c.method === 'tab.create')?.params).toEqual({
+      workspace_id: 'w7',
+      label: 'terminal',
+      focus: false,
+      cwd: '/home/tester',
+    });
+  });
+  it('starts an agent session in the home workspace when no project is given', async () => {
+    const { query, calls } = sessionSetup({ homeWorkspace: true });
+    const { body } = await query(
+      'mutation { startSession(kind:"claude", name:"claude-9") { workspaceId ready } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startSession).toEqual({ workspaceId: 'w7', ready: true });
+    expect(calls.find((c) => c.method === 'tab.create')?.params).toMatchObject({
+      workspace_id: 'w7',
+      cwd: '/home/tester',
+    });
+  });
+  it('reports a terminal whose shell is still busy as not ready', async () => {
+    const { query } = sessionSetup({ shellBusyPolls: 100000 });
+    const { body } = await query(
+      'mutation { startTerminal(workspaceId:"w1") { ready } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startTerminal.ready).toBe(false);
+  });
+  it('reports not ready when the shell cannot be checked', async () => {
+    const { query } = sessionSetup({ processInfoFails: true });
+    const { body } = await query(
+      'mutation { startTerminal(workspaceId:"w1") { ready } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startTerminal.ready).toBe(false);
+  });
+  it('rejects an unknown project before opening a terminal', async () => {
+    const { query, calls } = sessionSetup();
+    const { body } = await query(
+      'mutation { startTerminal(workspaceId:"w404") { paneId } }',
+    );
+    expect(body.errors[0].extensions.code).toBe('BAD_USER_INPUT');
+    expect(calls.some((c) => c.method === 'tab.create')).toBe(false);
   });
   it('validates new sessions before opening a tab', async () => {
     const { query, calls } = sessionSetup();
