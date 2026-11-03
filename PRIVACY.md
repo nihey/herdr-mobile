@@ -6,7 +6,7 @@ Herd Remote is an unofficial Android companion for [Herdr](https://github.com/he
 
 ## Summary
 
-The developer runs no server and receives no data from the app. The app has no accounts, ads, analytics or crash reporting. It talks only to the bridges that you pair: small programs that you run on your own computers.
+The developer runs no server and receives no data from the app. If you use the optional Hermes chat, your computer sends your Hermes messages and the agent output it reads to Hermes's AI model provider. The app has no accounts, ads, analytics or crash reporting. It talks only to the bridges that you pair: small programs that you run on your own computers.
 
 ## Data stored on your phone
 
@@ -17,7 +17,11 @@ Removing a machine in the app deletes its saved entry. Uninstalling the app, or 
 
 ## Data sent over the network
 
-The app sends requests only to the bridge addresses that you enter or pick. The recommended setup is your private Tailscale network. These requests carry the pairing token, the prompts, keys and text that you send, the sessions and terminals that you start (project or home folder, agent kind and name), the commands that you run in terminals, and the agent status and terminal output that your computer returns. When you open device discovery, they also return the names and private addresses of the devices on your tailnet. This data moves between your phone and your own computer. It is not sent to the developer or to any other party.
+The app sends requests only to the bridge addresses that you enter or pick. The recommended setup is your private Tailscale network. These requests carry the pairing token, the prompts, keys and text that you send, the sessions and terminals that you start (project or home folder, agent kind and name), the commands that you run in terminals, and the agent status and terminal output that your computer returns. When you open device discovery, they also return the names and private addresses of the devices on your tailnet. This data moves between your phone and your own computer. It is not sent to the developer or to any other party, except what you choose to send to Hermes's model provider (see Hermes).
+
+## Hermes
+
+The app includes an optional chat with a Hermes agent that runs on your computer, started by your bridge. When you use it, your messages to Hermes, and what Hermes reads from your agents to answer (their status and recent terminal output, which can include code, logs or anything an agent printed), are sent from your computer to the AI model provider that Hermes is configured to use there. By default that is OpenAI, through your own Codex sign-in. The conversation is kept on your computer in Hermes's own session store. Nothing is sent to a model provider unless you use the Hermes chat. Reporting a reply opens a draft email in your email app; nothing is sent unless you send it.
 
 ## Microphone
 
