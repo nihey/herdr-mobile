@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
+    "backgroundColor": "#171421",
     "ios": {
       "supportsTablet": true
     },
@@ -47,6 +48,36 @@
             "com.google.android.tts",
             "com.google.android.googlequicksearchbox"
           ]
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#171421",
+          "image": "./assets/splash-blank.png",
+          "imageWidth": 64
+        }
+      ],
+      [
+        "expo-font",
+        {
+          "android": {
+            "fonts": [
+              {
+                "fontFamily": "NotoSansMono",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/NotoSansMono-Regular.ttf",
+                    "weight": 400
+                  },
+                  {
+                    "path": "./assets/fonts/NotoSansMono-Bold.ttf",
+                    "weight": 700
+                  }
+                ]
+              }
+            ]
+          }
         }
       ]
     ],

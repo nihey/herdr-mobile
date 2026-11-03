@@ -16,53 +16,102 @@ import {
 } from 'react-native';
 import { X } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { statusMark, type StatusTone } from '@/lib/status';
 
+/** `#rrggbb` at an opacity, for tinted backgrounds and borders. */
+export function tint(hex: string, alpha: number) {
+  const value = parseInt(hex.slice(1), 16);
+  return `rgba(${(value >> 16) & 255},${(value >> 8) & 255},${value & 255},${alpha})`;
+}
+
+// The user's terminal: GNOME Terminal's dark scheme under Herdr's catppuccin.
+const accent = '#89B4FA';
 export const c = {
-  bg: '#101713',
-  panel: '#19221C',
-  elevated: '#232E26',
-  line: '#303D32',
-  text: '#F1F1E7',
-  muted: '#A2ADA0',
-  accent: '#B8E6B3',
-  ink: '#172314',
-  amber: '#EFBE78',
-  red: '#F0A69A',
+  bg: '#171421',
+  panel: '#1E1E2E',
+  elevated: '#313244',
+  line: '#313244',
+  text: '#CDD6F4',
+  muted: '#A6ADC8',
+  dim: '#6C7086',
+  accent,
+  /** Text on accent backgrounds. */
+  ink: '#171421',
+  /** Working. */
+  amber: '#F9E2AF',
+  /** Needs input, danger. */
+  red: '#F38BA8',
+  /** Done, success. */
+  green: '#A6E3A1',
+  /** Terminal output text. */
+  term: '#D0CFCC',
+  /** Highlighted row, like Herdr's selected row. */
+  select: tint(accent, 0.14),
+  scrim: '#00000099',
 };
-export const mono = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
+export function toneColor(tone: StatusTone) {
+  return tone === 'red'
+    ? c.red
+    : tone === 'amber'
+      ? c.amber
+      : tone === 'green'
+        ? c.green
+        : c.dim;
+}
+/** Noto Sans Mono (bundled, the user's terminal font); weights 400 and 700. */
+export const mono = Platform.OS === 'android' ? 'NotoSansMono' : 'Menlo';
+export const radius = 4;
 export const s = StyleSheet.create({
   screen: { flex: 1, backgroundColor: c.bg },
-  page: { padding: 22, gap: 20 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  page: { padding: 18, gap: 16 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   between: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
   title: {
     color: c.text,
-    fontSize: 36,
-    fontWeight: '600',
-    letterSpacing: -1.4,
+    fontFamily: mono,
+    fontSize: 22,
+    lineHeight: 30,
+    fontWeight: '700',
   },
   heading: {
     color: c.text,
-    fontSize: 21,
-    fontWeight: '600',
-    letterSpacing: -0.5,
+    fontFamily: mono,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
   },
-  body: { color: c.text, fontSize: 15, lineHeight: 22 },
-  muted: { color: c.muted, fontSize: 13, lineHeight: 20 },
-  eyebrow: { color: c.muted, fontSize: 11, letterSpacing: 2, fontFamily: mono },
+  body: { color: c.text, fontFamily: mono, fontSize: 14, lineHeight: 20 },
+  muted: { color: c.muted, fontFamily: mono, fontSize: 12, lineHeight: 18 },
+  eyebrow: {
+    color: c.dim,
+    fontFamily: mono,
+    fontSize: 11,
+    lineHeight: 15,
+    letterSpacing: 0.5,
+  },
   card: {
-    padding: 18,
+    padding: 14,
     backgroundColor: c.panel,
-    borderRadius: 18,
+    borderRadius: radius,
     borderWidth: 1,
     borderColor: c.line,
-    gap: 12,
+    gap: 10,
   },
+  /** A list row; add `selected` for Herdr's highlighted row. */
+  item: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: 'transparent',
+    borderRadius: 2,
+    gap: 3,
+  },
+  selected: { backgroundColor: c.select, borderLeftColor: c.accent },
   divider: { height: 1, backgroundColor: c.line },
 });
 export function Pulse({
@@ -72,42 +121,22 @@ export function Pulse({
   color?: string;
   size?: number;
 }) {
-  const anim = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(anim, {
-          toValue: 0.35,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-        Animated.timing(anim, {
-          toValue: 1,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    loop.start();
-    return () => {
-      loop.stop();
-    };
-  }, [anim]);
   return (
-    <Animated.View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        backgroundColor: color,
-        opacity: anim,
-      }}
-    />
+    <Blink>
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: color,
+        }}
+      />
+    </Blink>
   );
 }
 export function LiveBadge({
   active,
-  label = 'LIVE',
+  label = 'live',
   tone = 'live',
 }: {
   active: boolean;
@@ -115,40 +144,40 @@ export function LiveBadge({
   tone?: 'live' | 'paused';
 }) {
   if (!active) return null;
-  const paused = tone === 'paused';
-  const color = paused ? c.amber : c.accent;
+  const color = tone === 'paused' ? c.amber : c.green;
   return (
     <View
       style={{
         flexDirection: 'row',
         alignItems: 'center',
         gap: 5,
-        backgroundColor: paused ? '#2E2618' : '#1B2E1B',
-        paddingHorizontal: 7,
-        paddingVertical: 3,
-        borderRadius: 5,
+        backgroundColor: tint(color, 0.1),
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: radius,
         borderWidth: 1,
-        borderColor: paused ? '#5A4A2A' : '#2F4A2F',
+        borderColor: tint(color, 0.3),
       }}
     >
-      {paused ? (
+      {tone === 'paused' ? (
         <View
           style={{
             width: 5,
             height: 5,
-            borderRadius: 2.5,
+            borderRadius: 1,
             backgroundColor: color,
           }}
         />
       ) : (
-        <Pulse size={5} />
+        <Pulse size={5} color={color} />
       )}
       <Text
         style={{
           color,
-          fontSize: 9,
+          fontFamily: mono,
+          fontSize: 10,
+          lineHeight: 13,
           fontWeight: '700',
-          letterSpacing: 1,
         }}
       >
         {label}
@@ -198,27 +227,37 @@ export function Button({
       onPress={onPress}
       style={({ pressed }) => [
         {
-          minHeight: 48,
-          borderRadius: 12,
-          paddingHorizontal: 16,
-          paddingVertical: 12,
+          minHeight: 44,
+          borderRadius: radius,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 9,
+          gap: 8,
+          borderWidth: variant === 'primary' || variant === 'ghost' ? 0 : 1,
+          borderColor: variant === 'danger' ? tint(c.red, 0.35) : c.line,
           backgroundColor:
             variant === 'primary'
               ? c.accent
               : variant === 'ghost'
                 ? 'transparent'
-                : c.elevated,
+                : c.panel,
           opacity: disabled || busy ? 0.45 : pressed ? 0.7 : 1,
         },
         style,
       ]}
     >
       {busy ? <ActivityIndicator color={fg} size="small" /> : icon}
-      <Text style={{ color: fg, fontSize: 14, fontWeight: '600' }}>
+      <Text
+        style={{
+          color: fg,
+          fontFamily: mono,
+          fontSize: 13,
+          lineHeight: 18,
+          fontWeight: variant === 'primary' ? '700' : '400',
+        }}
+      >
         {title}
       </Text>
     </Pressable>
@@ -231,7 +270,7 @@ export function IconButton({
   primary = false,
   disabled = false,
   busy = false,
-  size = 48,
+  size = 44,
 }: {
   label: string;
   onPress: () => void;
@@ -252,7 +291,7 @@ export function IconButton({
       style={({ pressed }) => ({
         width: size,
         height: size,
-        borderRadius: size > 40 ? 14 : 12,
+        borderRadius: radius,
         backgroundColor: primary ? c.accent : pressed ? c.line : c.panel,
         alignItems: 'center',
         justifyContent: 'center',
@@ -272,10 +311,10 @@ export function Field({
   ...props
 }: TextInputProps & { label?: string }) {
   return (
-    <View style={{ gap: 8 }}>
+    <View style={{ gap: 6 }}>
       {label && <Text style={s.muted}>{label}</Text>}
       <TextInput
-        placeholderTextColor={c.muted}
+        placeholderTextColor={c.dim}
         selectionColor={c.accent}
         autoCapitalize="none"
         autoCorrect={false}
@@ -284,14 +323,15 @@ export function Field({
         style={[
           {
             color: c.text,
+            fontFamily: mono,
             backgroundColor: c.panel,
             borderWidth: 1,
             borderColor: c.line,
-            borderRadius: 12,
-            minHeight: 52,
-            paddingHorizontal: 15,
-            paddingVertical: 13,
-            fontSize: 15,
+            borderRadius: radius,
+            minHeight: 48,
+            paddingHorizontal: 12,
+            paddingVertical: 11,
+            fontSize: 14,
           },
           props.style,
         ]}
@@ -299,49 +339,62 @@ export function Field({
     </View>
   );
 }
+/** Herdr's status mark and label: ● needs input, ◐ working, ✓ done, ○ idle. */
 export function Status({
   status,
   pulse = false,
+  label = true,
 }: {
   status: string;
   pulse?: boolean;
+  label?: boolean;
 }) {
-  const color =
-    status === 'working'
-      ? c.accent
-      : status === 'blocked'
-        ? c.amber
-        : status === 'done'
-          ? '#A9CDEE'
-          : c.muted;
-  const label =
-    status === 'blocked'
-      ? 'Needs input'
-      : status.charAt(0).toUpperCase() + status.slice(1);
+  const mark = statusMark(status);
+  const color = toneColor(mark.tone);
+  const glyph = (
+    <Text style={{ color, fontFamily: mono, fontSize: 13, lineHeight: 18 }}>
+      {mark.glyph}
+    </Text>
+  );
   return (
     <View
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
+        gap: 5,
         flexShrink: 0,
       }}
     >
-      {pulse && status === 'working' ? (
-        <Pulse size={6} color={color} />
-      ) : (
-        <View
-          style={{
-            width: 6,
-            height: 6,
-            backgroundColor: color,
-            borderRadius: 3,
-          }}
-        />
+      {pulse && status === 'working' ? <Blink>{glyph}</Blink> : glyph}
+      {label && (
+        <Text style={{ color, fontFamily: mono, fontSize: 12, lineHeight: 18 }}>
+          {mark.label}
+        </Text>
       )}
-      <Text style={{ color, fontSize: 12, fontWeight: '500' }}>{label}</Text>
     </View>
   );
+}
+function Blink({ children }: { children: ReactNode }) {
+  const anim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 0.35,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [anim]);
+  return <Animated.View style={{ opacity: anim }}>{children}</Animated.View>;
 }
 export function Notice({
   message,
@@ -350,24 +403,19 @@ export function Notice({
   message: string;
   danger?: boolean;
 }) {
+  const color = danger ? c.red : c.amber;
   return (
     <View
       accessibilityRole="alert"
       style={{
-        padding: 14,
-        borderRadius: 12,
-        backgroundColor: c.elevated,
-        borderLeftColor: danger ? c.red : c.amber,
-        borderLeftWidth: 3,
+        padding: 12,
+        borderRadius: radius,
+        backgroundColor: tint(color, 0.08),
+        borderLeftColor: color,
+        borderLeftWidth: 2,
       }}
     >
-      <Text
-        style={{
-          color: danger ? c.red : c.amber,
-          fontSize: 13,
-          lineHeight: 20,
-        }}
-      >
+      <Text style={{ color, fontFamily: mono, fontSize: 12, lineHeight: 18 }}>
         {message}
       </Text>
     </View>
@@ -397,7 +445,7 @@ export function Sheet({
         behavior="padding"
         style={{
           flex: 1,
-          backgroundColor: '#00000099',
+          backgroundColor: c.scrim,
           justifyContent: 'flex-end',
         }}
       >
@@ -405,23 +453,25 @@ export function Sheet({
           edges={['bottom']}
           style={{
             backgroundColor: c.panel,
-            borderTopLeftRadius: 24,
-            borderTopRightRadius: 24,
+            borderTopLeftRadius: 8,
+            borderTopRightRadius: 8,
+            borderTopWidth: 1,
+            borderColor: c.line,
             maxHeight: '90%',
           }}
         >
-          <View style={[s.between, { padding: 20 }]}>
+          <View style={[s.between, { padding: 16 }]}>
             <Text style={s.heading}>{title}</Text>
-            <IconButton label="Close dialog" onPress={onClose}>
-              <X color={c.text} size={20} />
+            <IconButton label="Close dialog" onPress={onClose} size={40}>
+              <X color={c.text} size={18} />
             </IconButton>
           </View>
           <ScrollView
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{
-              paddingHorizontal: 20,
-              paddingBottom: 24,
-              gap: 18,
+              paddingHorizontal: 16,
+              paddingBottom: 20,
+              gap: 16,
             }}
           >
             {children}
@@ -439,14 +489,14 @@ export function ErrorSheet({
   onClose: () => void;
 }) {
   return (
-    <Sheet title="Action needs attention" visible={!!message} onClose={onClose}>
+    <Sheet title="needs attention" visible={!!message} onClose={onClose}>
       <Notice message={message ?? ''} danger />
-      <Button title="Got it" onPress={onClose} />
+      <Button title="got it" onPress={onClose} />
     </Sheet>
   );
 }
 export function Loading({
-  label = 'Connecting to your agents…',
+  label = 'connecting to your agents…',
 }: {
   label?: string;
 }) {
@@ -456,7 +506,7 @@ export function Loading({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        gap: 18,
+        gap: 14,
       }}
     >
       <ActivityIndicator color={c.accent} />
