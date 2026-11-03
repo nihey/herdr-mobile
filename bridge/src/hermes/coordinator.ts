@@ -21,7 +21,8 @@ export type ConversationMessage = {
   at: string;
 };
 export type Conversation = {
-  status: 'starting' | 'ready' | 'unavailable';
+  /** `off`: not started yet (the home summary never starts Hermes). */
+  status: 'off' | 'starting' | 'ready' | 'unavailable';
   reason: string | null;
   model: string | null;
   modelNote: string | null;
@@ -82,12 +83,19 @@ export function createCoordinator(options: {
   toolSpecs?: ToolSpec[];
   model?: ModelChoice;
   turnTimeoutMs?: number;
+  /** How long a stopped turn may take to confirm before Hermes is restarted. */
+  stopGraceMs?: number;
+  startTimeoutMs?: number;
   restartDelayMs?: number;
   now?: () => Date;
 }) {
   const now = options.now ?? (() => new Date());
   const turnTimeoutMs = options.turnTimeoutMs ?? 10 * 60 * 1000;
+  const stopGraceMs = options.stopGraceMs ?? 5000;
+  const startTimeoutMs = options.startTimeoutMs ?? 90000;
   const restartDelayMs = options.restartDelayMs ?? 30000;
+  let startTimer: NodeJS.Timeout | undefined;
+  let launched = false;
   let host: HermesHost | null = null;
   let generation = 0;
   let status: Conversation['status'] = 'starting';
@@ -97,8 +105,12 @@ export function createCoordinator(options: {
   let messages: ConversationMessage[] = [];
   let failedAt = 0;
   let current:
-    (Turn & { reply: ConversationMessage; timer: NodeJS.Timeout }) | null =
-    null;
+    | (Turn & {
+        reply: ConversationMessage;
+        timer: NodeJS.Timeout;
+        note?: string;
+      })
+    | null = null;
   let pendingReset: (() => void) | null = null;
   let choice: (ModelChoice & { codex: string | null; probe: boolean }) | null =
     null;
@@ -146,6 +158,8 @@ export function createCoordinator(options: {
   }
   function launch(next: NonNullable<typeof choice>) {
     choice = next;
+    launched = true;
+    clearTimeout(startTimer);
     const spawned = options.spawn();
     const mine = ++generation;
     host = spawned;
@@ -156,10 +170,16 @@ export function createCoordinator(options: {
     status = 'starting';
     reason = null;
     spawned.onMessage((message) => {
-      if (mine === generation) void handle(spawned, message);
+      if (mine !== generation) return;
+      // A bug here must never take the whole bridge down.
+      handle(spawned, message).catch(() => {
+        retire(host);
+        unavailable('Hermes stopped after an internal bridge error.');
+      });
     });
     spawned.onExit(() => {
       if (mine !== generation) return;
+      clearTimeout(startTimer);
       host = null;
       if (status !== 'unavailable')
         unavailable('Hermes stopped unexpectedly. It restarts shortly.');
@@ -176,6 +196,11 @@ export function createCoordinator(options: {
       tools: options.toolSpecs ?? TOOL_SPECS,
       probe: next.probe,
     });
+    startTimer = setTimeout(() => {
+      if (mine !== generation || status !== 'starting') return;
+      retire(host);
+      unavailable('Hermes did not start in time. It will try again shortly.');
+    }, startTimeoutMs);
   }
   function ensureStarted() {
     if (host) return;
@@ -189,6 +214,7 @@ export function createCoordinator(options: {
     old?.stop();
   }
   function onReady(message: Extract<HostOut, { type: 'ready' }>) {
+    clearTimeout(startTimer);
     const offered = [...message.tools].sort();
     const expected = [...TOOL_NAMES].sort();
     if (offered.join() !== expected.join()) {
@@ -214,12 +240,20 @@ export function createCoordinator(options: {
       modelNote = `${message.defaultModel} · codex's ${chosen.codex} isn't available in hermes`;
       return;
     }
-    writeState({
-      sessionId: message.sessionId,
-      ...(message.probe?.ok && chosen.codex
-        ? { verifiedModel: chosen.codex }
-        : {}),
-    });
+    try {
+      writeState({
+        sessionId: message.sessionId,
+        ...(message.probe?.ok && chosen.codex
+          ? { verifiedModel: chosen.codex }
+          : {}),
+      });
+    } catch (error) {
+      retire(host);
+      unavailable(
+        `Hermes could not save its state on this computer (${(error as Error).message}).`,
+      );
+      return;
+    }
     model = chosen.model || message.defaultModel;
     if (chosen.codex) modelNote = null;
     messages = fromHistory(message.history);
@@ -266,7 +300,14 @@ export function createCoordinator(options: {
         : typeof result.name === 'string'
           ? result.name
           : null;
-    return [{ kind, paneId, title }];
+    return [
+      {
+        kind,
+        paneId,
+        title,
+        ...(result.uncertain === true ? { uncertain: true } : {}),
+      },
+    ];
   }
   function finishTurn(
     turnId: string,
@@ -274,11 +315,31 @@ export function createCoordinator(options: {
   ) {
     if (!current || current.id !== turnId) return;
     clearTimeout(current.timer);
-    const { reply } = current;
+    const { reply, note } = current;
     if (end.text) reply.text = end.text;
     if (end.error) reply.text = `Hermes couldn't answer: ${end.error}`;
+    if (note) reply.text = reply.text ? `${reply.text}\n\n${note}` : note;
     reply.stopped = end.stopped;
     current = null;
+  }
+  /**
+   * Stop the running turn. The bridge refuses its further changes at once;
+   * if Hermes never confirms, the turn ends anyway and Hermes is restarted so
+   * a stalled host cannot refuse the next message.
+   */
+  function stopTurn(note?: string) {
+    const turn = current;
+    if (!turn) return;
+    turn.cancelled = true;
+    if (note) turn.note = note;
+    host?.send({ type: 'cancel', turnId: turn.id });
+    clearTimeout(turn.timer);
+    turn.timer = setTimeout(() => {
+      if (current !== turn) return;
+      finishTurn(turn.id, { stopped: true });
+      retire(host);
+      launch(choice ?? chooseModel());
+    }, stopGraceMs);
   }
   async function handle(from: HermesHost, message: HostOut) {
     switch (message.type) {
@@ -296,8 +357,9 @@ export function createCoordinator(options: {
         });
         return;
       case 'tool_call': {
-        // Only the running user turn may change anything.
-        const turn = current?.id === message.turnId ? current : null;
+        // Only the running, unstopped user turn may change anything.
+        const turn =
+          current?.id === message.turnId && !current.cancelled ? current : null;
         const outcome = await options.tools.run(
           turn,
           message.name,
@@ -314,14 +376,25 @@ export function createCoordinator(options: {
         return;
       }
       case 'fatal':
+        clearTimeout(startTimer);
         retire(host);
         unavailable(fatalReason(message));
         return;
     }
   }
   return {
-    conversation(): Conversation {
-      ensureStarted();
+    /** `start: false` (the home summary) never starts Hermes. */
+    conversation(options: { start?: boolean } = {}): Conversation {
+      if (options.start !== false) ensureStarted();
+      else if (!launched)
+        return {
+          status: 'off',
+          reason: null,
+          model: null,
+          modelNote: null,
+          working: false,
+          messages: [],
+        };
       return {
         status,
         reason,
@@ -357,16 +430,16 @@ export function createCoordinator(options: {
         { id: nextId(), role: 'user', text, chips: [], stopped: false, at },
         reply,
       );
-      const timer = setTimeout(() => {
-        host?.send({ type: 'cancel', turnId: id });
-        finishTurn(id, { stopped: true });
-      }, turnTimeoutMs);
+      const timer = setTimeout(
+        () => stopTurn('Hermes took too long and was stopped.'),
+        turnTimeoutMs,
+      );
       current = { id, changes: 0, reply, timer };
       host.send({ type: 'turn', turnId: id, text });
       return id;
     },
     stop() {
-      if (current && host) host.send({ type: 'cancel', turnId: current.id });
+      stopTurn();
     },
     async reset() {
       if (current)
@@ -384,6 +457,7 @@ export function createCoordinator(options: {
       await ready;
     },
     close() {
+      clearTimeout(startTimer);
       if (current) clearTimeout(current.timer);
       retire(host);
     },

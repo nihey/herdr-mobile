@@ -57,6 +57,8 @@ export type HermesChip = {
   kind: 'READ' | 'SENT' | 'STARTED';
   paneId: string;
   title: string | null;
+  /** The change may or may not have happened. */
+  uncertain?: boolean;
 };
 export type HermesMessage = {
   id: string;
@@ -67,7 +69,7 @@ export type HermesMessage = {
   chips: HermesChip[];
 };
 export type Hermes = {
-  status: 'STARTING' | 'READY' | 'UNAVAILABLE';
+  status: 'OFF' | 'STARTING' | 'READY' | 'UNAVAILABLE';
   reason: string | null;
   model: string | null;
   modelNote: string | null;

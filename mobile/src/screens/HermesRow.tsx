@@ -9,7 +9,10 @@ import { isOutdated } from '@/lib/sessions';
 import type { Hermes } from '@/lib/types';
 import { c, mono, Pulse, s, tint } from '@/components/ui';
 
-type Summary = Pick<Hermes, 'status' | 'reason' | 'working' | 'messages'>;
+type Summary = Pick<
+  Hermes,
+  'status' | 'reason' | 'modelNote' | 'working' | 'messages'
+>;
 
 /**
  * Hermes pinned above the agents. Polls on its own so a bridge without
@@ -70,6 +73,19 @@ export function HermesRow() {
       >
         {line}
       </Text>
+      {!outdated && !!summary.data?.modelNote && (
+        <Text
+          numberOfLines={1}
+          style={{
+            color: c.amber,
+            fontFamily: mono,
+            fontSize: 11,
+            lineHeight: 15,
+          }}
+        >
+          {summary.data.modelNote}
+        </Text>
+      )}
     </Pressable>
   );
 }

@@ -21,7 +21,7 @@ The app sends requests only to the bridge addresses that you enter or pick. The 
 
 ## Hermes
 
-The app includes an optional chat with a Hermes agent that runs on your computer, started by your bridge. When you use it, your messages to Hermes, and what Hermes reads from your agents to answer (their status and recent terminal output, which can include code, logs or anything an agent printed), are sent from your computer to the AI model provider that Hermes is configured to use there. By default that is OpenAI, through your own Codex sign-in. The conversation is kept on your computer in Hermes's own session store. Nothing is sent to a model provider unless you use the Hermes chat. Reporting a reply opens a draft email in your email app; nothing is sent unless you send it.
+The app includes an optional chat with a Hermes agent that runs on your computer, started by your bridge. Hermes starts when you open the Hermes chat. When you use it, your messages to Hermes, and what Hermes reads from your agents to answer (their names, task titles, project names and folders, status and recent terminal output, which can include code, logs or anything an agent printed), are sent from your computer to the AI model provider that Hermes is configured to use there. By default that is OpenAI, through your own Codex sign-in. When Hermes starts with a model it has not used before, it first sends one short test request with no agent data. The conversation is kept on your computer in Hermes's own session store. Nothing is sent to a model provider unless you open the Hermes chat. Reporting a reply opens a draft email in your email app; nothing is sent unless you send it.
 
 ## Microphone
 

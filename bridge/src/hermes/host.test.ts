@@ -140,7 +140,7 @@ describe.skipIf(!existsSync(python))('Hermes host', () => {
     driver.send({ type: 'turn', turnId: 't2', text: 'how are you?' });
     await driver.next('turn_end', mark);
     const last = JSON.stringify(model.requests.at(-1));
-    expect(last).toContain('Stopped by the user.');
+    expect(last).toContain('Nothing more will be done');
   }, 30000);
 
   it("reloads a session's history", async () => {
@@ -175,7 +175,7 @@ describe.skipIf(!existsSync(python))('Hermes host', () => {
           {
             name: 'read_agent',
             args: { agent_id: 'w1:p1' },
-            result: '{"status":"working"}',
+            result: '{"status": "working"}',
           },
         ],
         stopped: false,
@@ -207,4 +207,168 @@ describe('Hermes host environment', () => {
       PATH: 'p',
     });
   });
+});
+
+// Final review fixes: unfinished requests stay closed, in-flight results are
+// recorded as they happened, the probe carries no tools, ready stays small.
+type Message = { role: string; content?: unknown };
+const messagesOf = (request: Record<string, unknown> | undefined) =>
+  (request?.messages ?? []) as Message[];
+const text = (m: Message) =>
+  typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? '');
+const notFound = {
+  status: 404,
+  body: {
+    error: {
+      message: 'The model fake-model does not exist',
+      code: 'model_not_found',
+    },
+  },
+};
+
+describe.skipIf(!existsSync(python))('Hermes host: unfinished requests', () => {
+  it('closes a failed request so the next message is not merged with it', async () => {
+    const { driver, start, model } = await setup([notFound, { text: 'fine' }]);
+    start();
+    await driver.next('ready');
+    driver.send({ type: 'turn', turnId: 't1', text: 'tell X to deploy' });
+    const failed = await driver.next('turn_end');
+    expect(failed.error).toContain('404');
+    const mark = driver.seen.length;
+    driver.send({ type: 'turn', turnId: 't2', text: 'how are you?' });
+    await driver.next('turn_end', mark);
+    const messages = messagesOf(model.requests.at(-1));
+    const users = messages.filter((m) => m.role === 'user').map(text);
+    expect(
+      users.some((u) => u.includes('deploy') && u.includes('how are you')),
+    ).toBe(false);
+    expect(
+      messages.some(
+        (m) =>
+          m.role === 'assistant' &&
+          text(m).includes('Nothing more will be done'),
+      ),
+    ).toBe(true);
+  }, 30000);
+
+  it('closes a turn cut off by a restart', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'herd-hermes-'));
+    cleanup.push(() => rmSync(home, { recursive: true }));
+    const first = await setup(
+      [
+        {
+          tool: 'send_to_agent',
+          args: { agent_id: 'w1:p1', message: 'deploy' },
+        },
+      ],
+      home,
+    );
+    first.start();
+    const ready = await first.driver.next('ready');
+    first.driver.send({
+      type: 'turn',
+      turnId: 't1',
+      text: 'tell X and Y to deploy',
+    });
+    const call = await first.driver.next('tool_call');
+    first.driver.send({
+      type: 'tool_result',
+      callId: call.callId,
+      ok: true,
+      result: '{"sent":true,"agent_id":"w1:p1"}',
+    });
+    await new Promise((r) => setTimeout(r, 500));
+    first.driver.host.stop();
+    await new Promise((r) => setTimeout(r, 500));
+    const second = await setup([{ text: 'all quiet' }], home);
+    second.start(ready.sessionId);
+    const again = await second.driver.next('ready');
+    expect(again.history.at(-1)).toMatchObject({
+      role: 'hermes',
+      stopped: true,
+    });
+    second.driver.send({ type: 'turn', turnId: 't2', text: 'anything new?' });
+    await second.driver.next('turn_end');
+    const messages = messagesOf(second.model.requests.at(-1));
+    const last = messages.findLastIndex((m) => m.role === 'user');
+    expect(text(messages[last - 1] as Message)).toContain(
+      'Nothing more will be done',
+    );
+  }, 30000);
+
+  it("records the bridge's answer for a call in flight when stopped", async () => {
+    const home = mkdtempSync(join(tmpdir(), 'herd-hermes-'));
+    cleanup.push(() => rmSync(home, { recursive: true }));
+    const first = await setup(
+      [
+        { tool: 'send_to_agent', args: { agent_id: 'w1:p1', message: 'hi' } },
+        { text: 'done' },
+      ],
+      home,
+    );
+    first.start();
+    const ready = await first.driver.next('ready');
+    first.driver.send({ type: 'turn', turnId: 't1', text: 'tell it hi' });
+    const call = await first.driver.next('tool_call');
+    first.driver.send({ type: 'cancel', turnId: 't1' });
+    await new Promise((r) => setTimeout(r, 300));
+    first.driver.send({
+      type: 'tool_result',
+      callId: call.callId,
+      ok: true,
+      result: '{"sent":true,"agent_id":"w1:p1"}',
+    });
+    await first.driver.next('turn_end');
+    first.driver.host.stop();
+    const second = await setup([], home);
+    second.start(ready.sessionId);
+    const again = await second.driver.next('ready');
+    const tool = again.history
+      .flatMap((item) => item.tools)
+      .find((t) => t.name === 'send_to_agent');
+    expect(tool?.result).toContain('"sent": true');
+  }, 30000);
+
+  it('probes the model without tools', async () => {
+    const { driver, start, model } = await setup([{ text: 'OK' }]);
+    start(null, true);
+    const ready = await driver.next('ready');
+    expect(ready.probe).toEqual({ ok: true, modelMissing: false });
+    const tools = model.requests[0]?.tools;
+    expect(Array.isArray(tools) ? tools : []).toEqual([]);
+  }, 30000);
+
+  it('keeps reloaded tool results small', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'herd-hermes-'));
+    cleanup.push(() => rmSync(home, { recursive: true }));
+    const first = await setup(
+      [{ tool: 'read_agent', args: { agent_id: 'w1:p1' } }, { text: 'busy' }],
+      home,
+    );
+    first.start();
+    const ready = await first.driver.next('ready');
+    first.driver.send({ type: 'turn', turnId: 't1', text: 'how is w1?' });
+    const call = await first.driver.next('tool_call');
+    const big = JSON.stringify({
+      title: 'Payments migration',
+      status: 'working',
+      text: 'x'.repeat(30000),
+    });
+    first.driver.send({
+      type: 'tool_result',
+      callId: call.callId,
+      ok: true,
+      result: big,
+    });
+    await first.driver.next('turn_end');
+    first.driver.host.stop();
+    const second = await setup([], home);
+    second.start(ready.sessionId);
+    const again = await second.driver.next('ready');
+    const tool = again.history.flatMap((item) => item.tools)[0];
+    expect(tool?.result.length).toBeLessThan(1000);
+    expect(JSON.parse(tool?.result ?? '{}')).toMatchObject({
+      title: 'Payments migration',
+    });
+  }, 30000);
 });

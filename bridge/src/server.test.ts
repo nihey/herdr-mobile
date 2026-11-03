@@ -978,4 +978,55 @@ describe('Hermes over GraphQL', () => {
     const { status } = await query('{ hermes { status } }', {}, false);
     expect(status).toBe(401);
   });
+
+  it('does not start Hermes for the home summary', async () => {
+    const seen: unknown[] = [];
+    const { coordinator } = fakeCoordinator();
+    const conversation = coordinator.conversation;
+    const query = hermesSetup({
+      ...coordinator,
+      conversation: (options) => {
+        seen.push(options);
+        return { ...conversation(), status: 'off', messages: [] };
+      },
+    });
+    const { body } = await query('{ hermes(start: false) { status } }');
+    expect(body.data.hermes.status).toBe('OFF');
+    expect(seen).toEqual([{ start: false }]);
+  });
+
+  it('marks chips whose change is uncertain', async () => {
+    const { coordinator } = fakeCoordinator();
+    const conversation = coordinator.conversation;
+    const query = hermesSetup({
+      ...coordinator,
+      conversation: () => {
+        const value = conversation();
+        const reply = value.messages[1] as (typeof value.messages)[number];
+        return {
+          ...value,
+          messages: [
+            {
+              ...reply,
+              chips: [
+                { kind: 'sent', paneId: 'w1:p1', title: null, uncertain: true },
+              ],
+            },
+          ],
+        };
+      },
+    });
+    const { body } = await query(
+      '{ hermes { messages { chips { kind uncertain } } } }',
+    );
+    expect(body.data.hermes.messages[0].chips).toEqual([
+      { kind: 'SENT', uncertain: true },
+    ]);
+    const plain = await hermesSetup(coordinator)(
+      '{ hermes { messages(last: 1) { chips { uncertain } } } }',
+    );
+    expect(plain.body.data.hermes.messages[0].chips).toEqual([
+      { uncertain: false },
+    ]);
+  });
 });

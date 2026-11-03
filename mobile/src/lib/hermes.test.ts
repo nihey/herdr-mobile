@@ -88,4 +88,35 @@ describe('Hermes chat helpers', () => {
     expect(body).toContain('z'.repeat(2000));
     expect(body).not.toContain('z'.repeat(2001));
   });
+
+  it('labels a change that may not have happened', () => {
+    expect(
+      chipLabel(
+        {
+          kind: 'SENT',
+          paneId: 'w1:p1',
+          title: 'Payments migration',
+          uncertain: true,
+        },
+        agent('working'),
+      ),
+    ).toBe('may have sent to ◐ Payments migration');
+    expect(
+      chipLabel(
+        {
+          kind: 'STARTED',
+          paneId: 'w1:p2',
+          title: 'claude-beef',
+          uncertain: true,
+        },
+        undefined,
+      ),
+    ).toBe('may have started (closed) claude-beef');
+  });
+
+  it('summarizes Hermes before it starts', () => {
+    expect(summaryLine(hermes({ status: 'OFF' }))).toBe(
+      'ask about your agents',
+    );
+  });
 });

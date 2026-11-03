@@ -1,4 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -62,6 +68,7 @@ function setup({
   run = async (): Promise<ToolOutcome> => ({ ok: true, result: '{}' }),
   turnTimeoutMs,
   stateDir,
+  extra = {},
 }: {
   codex?: string | null;
   spawnNull?: boolean;
@@ -72,6 +79,7 @@ function setup({
   ) => Promise<ToolOutcome>;
   turnTimeoutMs?: number;
   stateDir?: string;
+  extra?: Partial<Parameters<typeof createCoordinator>[0]>;
 } = {}) {
   const dir = stateDir ?? mkdtempSync(join(tmpdir(), 'herd-coord-'));
   if (!stateDir) dirs.push(dir);
@@ -89,6 +97,7 @@ function setup({
     readCodexConfig: () => codex,
     instructions: 'coordinate',
     ...(turnTimeoutMs ? { turnTimeoutMs } : {}),
+    ...extra,
   });
   const host = () => hosts.at(-1) as FakeHost;
   return { coordinator, hosts, host, tools, dir };
@@ -244,18 +253,25 @@ describe('Hermes coordinator', () => {
   });
 
   it('ends a stalled turn', async () => {
-    const { coordinator, host } = setup({ turnTimeoutMs: 50 });
+    const { coordinator, hosts } = setup({
+      turnTimeoutMs: 50,
+      extra: { stopGraceMs: 30 },
+    });
     coordinator.conversation();
-    host().ready();
+    hosts[0]?.ready();
     const turnId = coordinator.send('hello?');
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await new Promise((resolve) => setTimeout(resolve, 120));
     const conversation = coordinator.conversation();
     expect(conversation.working).toBe(false);
     expect(conversation.messages.at(-1)).toMatchObject({
       role: 'hermes',
       stopped: true,
+      text: 'Hermes took too long and was stopped.',
     });
-    expect(host().last('cancel')).toEqual({ type: 'cancel', turnId });
+    expect(hosts[0]?.last('cancel')).toEqual({ type: 'cancel', turnId });
+    // The stalled host is replaced so the next message is not refused.
+    expect(hosts[0]?.stopped).toBe(true);
+    expect(hosts).toHaveLength(2);
   });
 
   it('maps reloaded history to messages and chips', () => {
@@ -332,5 +348,98 @@ describe('Hermes coordinator', () => {
       provider: '',
       probe: false,
     });
+  });
+
+  it('refuses tool calls after stop', async () => {
+    const { coordinator, host, tools } = setup();
+    coordinator.conversation();
+    host().ready();
+    const turnId = coordinator.send('tell X to deploy');
+    coordinator.stop();
+    host().emit({
+      type: 'tool_call',
+      turnId,
+      callId: 'c2',
+      name: 'send_to_agent',
+      args: { agent_id: 'w1:p1', message: 'deploy' },
+    });
+    await flush();
+    expect(tools.run).toHaveBeenCalledWith(null, 'send_to_agent', {
+      agent_id: 'w1:p1',
+      message: 'deploy',
+    });
+  });
+
+  it('finishes a stop that Hermes never confirms', async () => {
+    const { coordinator, hosts } = setup({ extra: { stopGraceMs: 30 } });
+    coordinator.conversation();
+    hosts[0]?.ready();
+    coordinator.send('count to a million');
+    coordinator.stop();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const conversation = coordinator.conversation();
+    expect(conversation.working).toBe(false);
+    expect(conversation.messages.at(-1)).toMatchObject({ stopped: true });
+    expect(hosts[0]?.stopped).toBe(true);
+    expect(hosts).toHaveLength(2);
+  });
+
+  it('gives up on a start that never becomes ready', async () => {
+    const { coordinator, host } = setup({ extra: { startTimeoutMs: 30 } });
+    coordinator.conversation();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const conversation = coordinator.conversation();
+    expect(conversation.status).toBe('unavailable');
+    expect(conversation.reason).toBe(
+      'Hermes did not start in time. It will try again shortly.',
+    );
+    expect(host().stopped).toBe(true);
+  });
+
+  it('survives a state file it cannot write', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'herd-coord-'));
+    dirs.push(dir);
+    // A directory where the state file should be: every write fails.
+    mkdirSync(join(dir, 'hermes-state.json'));
+    const { coordinator, host } = setup({ stateDir: dir });
+    coordinator.conversation();
+    expect(() => host().ready()).not.toThrow();
+    const conversation = coordinator.conversation();
+    expect(conversation.status).toBe('unavailable');
+    expect(conversation.reason).toContain('could not save its state');
+  });
+
+  it('does not start Hermes for a summary', () => {
+    const { coordinator, hosts } = setup();
+    const summary = coordinator.conversation({ start: false });
+    expect(summary.status).toBe('off');
+    expect(hosts).toHaveLength(0);
+    coordinator.conversation();
+    expect(hosts).toHaveLength(1);
+  });
+
+  it('shows uncertain changes from history', () => {
+    const { coordinator, host } = setup();
+    coordinator.conversation();
+    host().ready({
+      history: [
+        { role: 'user', text: 'tell api hi', tools: [], stopped: false },
+        {
+          role: 'hermes',
+          text: 'It may have arrived.',
+          tools: [
+            {
+              name: 'send_to_agent',
+              args: { agent_id: 'w1:p1' },
+              result: '{"uncertain": true, "agent_id": "w1:p1"}',
+            },
+          ],
+          stopped: false,
+        },
+      ],
+    });
+    expect(coordinator.conversation().messages[1]?.chips).toEqual([
+      { kind: 'sent', paneId: 'w1:p1', title: null, uncertain: true },
+    ]);
   });
 });

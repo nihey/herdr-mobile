@@ -27,8 +27,13 @@ export type Chip = {
   kind: 'read' | 'sent' | 'started';
   paneId: string;
   title: string | null;
+  /** The change may or may not have happened (uncertain delivery, failed start). */
+  uncertain?: boolean;
 };
-export type Turn = { id: string; changes: number };
+/** The running user turn; `cancelled` is set by stop, mid-call included. */
+export type Turn = { id: string; changes: number; cancelled?: boolean };
+const STOPPED =
+  'The user stopped this request. Nothing more is sent or started.';
 export type ToolOutcome = { ok: boolean; result: string; chip?: Chip };
 const READ_LINES = 200;
 const READ_BYTES = 24 * 1024;
@@ -196,7 +201,21 @@ export function createTools(
       const message = stringArg(args, 'message');
       if (!id || !message) return refuse('agent_id and message are required.');
       if (turn) turn.changes++;
-      await actions.prompt(id, message);
+      try {
+        await actions.prompt(id, message);
+      } catch (error) {
+        if (
+          !(error instanceof GraphQLError) ||
+          error.extensions.code !== 'delivery_unknown'
+        )
+          throw error;
+        // It may have arrived: record it, and tell Hermes never to resend.
+        const title = agentTitle(await findAgent(id));
+        return ok(
+          { uncertain: true, agent_id: id, note: herdrFailure(error).result },
+          { kind: 'sent', paneId: id, title, uncertain: true },
+        );
+      }
       const title = agentTitle(await findAgent(id));
       return ok(
         { sent: true, agent_id: id },
@@ -221,19 +240,36 @@ export function createTools(
         }
         workspaceId = String(match.workspace_id);
       }
+      if (turn?.cancelled) return refuse(STOPPED);
       if (turn) turn.changes++;
-      const started = await actions.startSession({
-        workspaceId,
-        name: newName(kind),
-        kind,
-      });
+      const name = newName(kind);
+      let started;
+      try {
+        started = await actions.startSession({ workspaceId, name, kind });
+      } catch (error) {
+        const paneId =
+          error instanceof GraphQLError ? error.extensions.paneId : undefined;
+        if (typeof paneId !== 'string') throw error;
+        // A tab (and maybe the agent) exists even though the start failed.
+        return ok(
+          {
+            uncertain: true,
+            agent_id: paneId,
+            name,
+            note: `${herdrFailure(error).result} The tab is open: tell the user to check it, and do not start another.`,
+          },
+          { kind: 'started', paneId, title: name, uncertain: true },
+        );
+      }
       const chip: Chip = {
         kind: 'started',
         paneId: started.paneId,
         title: started.name,
       };
       let firstTask: string | null = null;
-      if (task && !started.ready)
+      if (task && turn?.cancelled)
+        firstTask = 'not sent: the user stopped this request.';
+      else if (task && !started.ready)
         firstTask =
           'not sent: the agent was still starting. Tell the user to send it themselves.';
       else if (task) {
@@ -274,6 +310,7 @@ export function createTools(
           return refuse(
             'Messages and new agents only happen while answering the user.',
           );
+        if (turn.cancelled) return refuse(STOPPED);
         if (turn.changes >= CHANGES_PER_TURN)
           return refuse(
             `I can message or start at most ${CHANGES_PER_TURN} agents per request.`,

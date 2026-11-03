@@ -26,7 +26,12 @@ HERMES_DIR = os.environ.get(
     "HERD_HERMES_DIR", os.path.expanduser("~/.hermes/hermes-agent")
 )
 TOOLSET = "herd_remote"
-STOP_NOTE = "Stopped by the user. Nothing more will be done for that request."
+# Closes any request that did not finish cleanly (stopped, failed, cut off by a
+# restart), so the model never carries it into the next message.
+STOP_NOTE = "That request was stopped before it finished. Nothing more will be done for it."
+PROBE_TOOLSET = "herd_remote_probe"  # registers nothing: the probe sends no tools
+HISTORY_ITEMS = 200
+RESULT_KEYS = ("agent_id", "title", "name", "status", "sent", "started", "ready", "uncertain", "first_task", "error")
 TOOL_WAIT_SECONDS = 120
 
 
@@ -118,12 +123,6 @@ class Host:
                 entry["result"] = (bool(message.get("ok")), str(message.get("result", "")))
                 entry["event"].set()
 
-    def release_pending(self):
-        with self.pending_lock:
-            for entry in self.pending.values():
-                entry["result"] = (False, "Cancelled: the user stopped this request.")
-                entry["event"].set()
-
     # ---- agent ------------------------------------------------------------
 
     def runtime(self, settings):
@@ -144,11 +143,11 @@ class Host:
             "api_key": resolved.get("api_key"),
         }
 
-    def build_agent(self, session_id, session_db):
+    def build_agent(self, session_id, session_db, toolset=TOOLSET):
         settings = self.settings
         return AIAgent(
             model=settings["model"],
-            enabled_toolsets=[TOOLSET],
+            enabled_toolsets=[toolset],
             quiet_mode=True,
             platform="cli",
             session_id=session_id,
@@ -167,7 +166,7 @@ class Host:
 
     def probe(self):
         """One tool-less request with the chosen model, nothing persisted."""
-        agent = self.build_agent("herd-remote-probe-" + uuid.uuid4().hex[:8], None)
+        agent = self.build_agent("herd-remote-probe-" + uuid.uuid4().hex[:8], None, PROBE_TOOLSET)
         try:
             result = agent.run_conversation("Reply with OK.")
         except Exception as error:  # noqa: BLE001
@@ -179,7 +178,22 @@ class Host:
 
     def history(self):
         messages = self.db.get_messages_as_conversation(self.session_id, repair_alternation=True)
-        return to_history(messages)
+        return to_history(messages)[-HISTORY_ITEMS:]
+
+    def close_unfinished(self, session_id):
+        """End the session on a closed request: a turn cut off by a restart or a
+        crash leaves a user message or tool rows with no final answer."""
+        messages = self.db.get_messages_as_conversation(session_id, repair_alternation=True)
+        if not messages:
+            return
+        last = messages[-1]
+        finished = (
+            last.get("role") == "assistant"
+            and not last.get("tool_calls")
+            and content_text(last.get("content")).strip()
+        )
+        if not finished:
+            self.db.append_message(session_id, "assistant", STOP_NOTE)
 
     def ready(self, probe):
         default_model, default_provider = configured_default()
@@ -210,6 +224,7 @@ class Host:
         home = Path(os.environ.get("HERMES_HOME") or os.path.expanduser("~/.hermes"))
         self.db = SessionDB(db_path=home / "state.db")
         self.session_id = message.get("sessionId") or new_session_id()
+        self.close_unfinished(self.session_id)
         self.agent = self.build_agent(self.session_id, self.db)
         probe = self.probe() if message.get("probe") else None
         self.ready(probe)
@@ -232,26 +247,33 @@ class Host:
 
     def run_turn(self, turn_id, text):
         text_out, interrupted, error = "", False, None
+        session_id, agent = self.session_id, self.agent
         try:
-            history = self.db.get_messages_as_conversation(self.session_id, repair_alternation=True)
-            result = self.agent.run_conversation(text, conversation_history=history)
+            self.close_unfinished(session_id)
+            history = self.db.get_messages_as_conversation(session_id, repair_alternation=True)
+            result = agent.run_conversation(text, conversation_history=history)
             interrupted = bool(result.get("interrupted"))
             error = result.get("error") or None
             text_out = "" if error else (result.get("final_response") or "").strip()
-            if interrupted:
-                # The model must see the request as closed in later turns.
-                self.db.append_message(self.session_id, "assistant", STOP_NOTE)
         except Exception as exc:  # noqa: BLE001
             error = f"{type(exc).__name__}: {exc}"[:500]
         finally:
             self.turn_id = None
+        if interrupted or error:
+            # The model must see the request as closed in later turns, even
+            # after a partial reply.
+            try:
+                self.db.append_message(session_id, "assistant", STOP_NOTE)
+            except Exception:  # noqa: BLE001
+                pass
         emit({"type": "turn_end", "turnId": turn_id, "text": text_out,
               "interrupted": interrupted, "error": str(error)[:500] if error else None})
 
     def cancel(self, message):
         if self.turn_id and message.get("turnId") == self.turn_id:
+            # Pending tool calls still get the bridge's real answer, so Hermes
+            # records what actually happened before it stops.
             self.agent.hard_interrupt()
-            self.release_pending()
 
 
 def configured_default():
@@ -284,6 +306,22 @@ def content_text(content):
     return ""
 
 
+def summarize_result(text):
+    """Only what the bridge needs for chips: reads can be 24 KiB each."""
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return json.dumps({"error": text[:200]}) if text.startswith("{\"error") else text[:200]
+    if not isinstance(value, dict):
+        return json.dumps({"items": len(value)}) if isinstance(value, list) else text[:200]
+    kept = {}
+    for key in RESULT_KEYS:
+        if key in value:
+            item = value[key]
+            kept[key] = item[:200] if isinstance(item, str) else item
+    return json.dumps(kept)
+
+
 def to_history(messages):
     """Hermes's OpenAI-style rows → one user item and one hermes item per exchange."""
     items = []
@@ -314,7 +352,7 @@ def to_history(messages):
         elif role == "tool":
             tool = calls.get(row.get("tool_call_id"))
             if tool is not None:
-                tool["result"] = content_text(row.get("content"))
+                tool["result"] = summarize_result(content_text(row.get("content")))
     for item in items:
         if item["role"] == "hermes" and item["text"].endswith(STOP_NOTE):
             item["stopped"] = True

@@ -125,6 +125,7 @@ export function buildSchema(
         ready: Boolean!
       }
       enum HermesStatus {
+        OFF
         STARTING
         READY
         UNAVAILABLE
@@ -143,6 +144,8 @@ export function buildSchema(
         kind: HermesChipKind!
         paneId: ID!
         title: String
+        "The change may or may not have happened (uncertain delivery, failed start)."
+        uncertain: Boolean!
       }
       type HermesMessage {
         id: ID!
@@ -176,7 +179,8 @@ export function buildSchema(
         agentKinds: [String!]!
         "The bridge user's home folder, where home terminals open."
         homeFolder: String
-        hermes: Hermes!
+        "start: false (the home summary) never starts Hermes."
+        hermes(start: Boolean = true): Hermes!
         output(
           target: ID!
           source: OutputSource = RECENT
@@ -254,8 +258,8 @@ export function buildSchema(
           return [...new Set(kinds)];
         },
         homeFolder: () => homeDir,
-        hermes: () =>
-          hermes?.conversation() ?? {
+        hermes: (_: unknown, args: { start: boolean }) =>
+          hermes?.conversation({ start: args.start }) ?? {
             status: 'unavailable',
             reason: 'Hermes is not set up on this bridge.',
             model: null,
@@ -380,7 +384,10 @@ export function buildSchema(
         },
       },
       HermesMessage: { role: (m: { role: string }) => m.role.toUpperCase() },
-      HermesChip: { kind: (c: { kind: string }) => c.kind.toUpperCase() },
+      HermesChip: {
+        kind: (c: { kind: string }) => c.kind.toUpperCase(),
+        uncertain: (c: { uncertain?: boolean }) => c.uncertain === true,
+      },
       Workspace: { id: field('workspace_id'), status: field('agent_status') },
       Tab: { id: field('tab_id'), workspaceId: field('workspace_id') },
       Agent: {

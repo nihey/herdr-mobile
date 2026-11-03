@@ -14,7 +14,7 @@ const REPORT_CHARS = 2000;
 
 /** "sent to ◐ Payments migration"; an agent no longer open shows as closed. */
 export function chipLabel(chip: HermesChip, agent: Agent | undefined) {
-  const verb = VERBS[chip.kind];
+  const verb = `${chip.uncertain ? 'may have ' : ''}${VERBS[chip.kind]}`;
   if (!agent) return `${verb} (closed) ${chip.title ?? chip.paneId}`;
   const title =
     chip.title ?? (cleanTitle(agent.title) || agent.name || chip.paneId);

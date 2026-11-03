@@ -8,7 +8,14 @@ type Call = { method: string; params: Record<string, unknown> };
 function setup({
   output = 'line one\nline two',
   promptError,
-}: { output?: string; promptError?: string } = {}) {
+  startStatus = 'idle',
+  onStart,
+}: {
+  output?: string;
+  promptError?: string;
+  startStatus?: string;
+  onStart?: () => void;
+} = {}) {
   const calls: Call[] = [];
   const request = async (
     method: string,
@@ -55,8 +62,11 @@ function setup({
         };
       case 'pane.process_info':
         throw new HerdrError('unsupported', 'no process info');
+      case 'agent.start':
+        onStart?.();
+        return { type: 'ok' };
       case 'agent.get':
-        return { agent: { agent_status: 'idle' } };
+        return { agent: { agent_status: startStatus } };
       default:
         return { type: 'ok' };
     }
@@ -187,9 +197,57 @@ describe('coordinator tools', () => {
       agent_id: 'w1:p1',
       message: 'hello',
     });
-    expect(sent.ok).toBe(false);
     expect(sent.result).toContain('may have been delivered');
+    expect(JSON.parse(sent.result)).toMatchObject({
+      uncertain: true,
+      agent_id: 'w1:p1',
+    });
     expect(methods().filter((m) => m === 'agent.prompt')).toHaveLength(1);
+    // A send that may have happened is still shown.
+    expect(sent.chip).toEqual({
+      kind: 'sent',
+      paneId: 'w1:p1',
+      title: 'Payments migration',
+      uncertain: true,
+    });
+  });
+
+  it('records a start that failed after opening a tab', async () => {
+    const { tools, turn, methods } = setup({ startStatus: 'blocked' });
+    const started = await tools.run(turn, 'start_agent', {
+      project: 'api',
+      first_task: 'compare pricing pages',
+    });
+    expect(JSON.parse(started.result)).toMatchObject({
+      uncertain: true,
+      agent_id: 'w1:p2',
+    });
+    expect(started.chip).toEqual({
+      kind: 'started',
+      paneId: 'w1:p2',
+      title: 'claude-beef',
+      uncertain: true,
+    });
+    expect(methods()).not.toContain('agent.prompt');
+  });
+
+  it('stops a start the user cancelled', async () => {
+    const turn = { id: 't1', changes: 0, cancelled: false };
+    const { tools, methods } = setup({
+      onStart: () => (turn.cancelled = true),
+    });
+    const started = await tools.run(turn, 'start_agent', {
+      first_task: 'compare pricing pages',
+    });
+    expect(methods()).not.toContain('agent.prompt');
+    expect(JSON.parse(started.result).first_task).toContain('stopped');
+    expect(started.chip?.kind).toBe('started');
+    const after = await tools.run(turn, 'send_to_agent', {
+      agent_id: 'w1:p1',
+      message: 'hi',
+    });
+    expect(after.ok).toBe(false);
+    expect(after.result).toContain('stopped');
   });
 
   it('starts an agent in a named project and sends its first task once', async () => {

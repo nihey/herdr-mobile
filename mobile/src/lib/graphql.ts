@@ -192,16 +192,19 @@ export const HERMES = gql`
           kind
           paneId
           title
+          uncertain
         }
       }
     }
   }
 `;
+// The home row never starts Hermes: only opening the chat does.
 export const HERMES_SUMMARY = gql`
   query HermesSummary {
-    hermes {
+    hermes(start: false) {
       status
       reason
+      modelNote
       working
       messages(last: 1) {
         id
