@@ -136,13 +136,11 @@ export function MachinesScreen() {
           >
             <ArrowLeft size={21} color={c.text} />
           </IconButton>
-          <Text style={s.eyebrow}>YOUR PRIVATE NETWORK</Text>
+          <Text style={s.eyebrow}>your private network</Text>
           <Monitor size={22} color={c.accent} />
         </View>
         <View style={{ gap: 6 }}>
-          <Text style={s.title}>
-            Your machines<Text style={{ color: c.accent }}>.</Text>
-          </Text>
+          <Text style={s.title}>machines</Text>
           <Text style={s.muted}>
             A place for every agent. Switch computers while the work keeps
             running.
@@ -152,7 +150,7 @@ export function MachinesScreen() {
           <>
             <Notice message={storageError} danger />
             <Button
-              title="Retry saved machines"
+              title="retry saved machines"
               variant="secondary"
               busy={busy}
               onPress={() => {
@@ -167,9 +165,9 @@ export function MachinesScreen() {
         )}
         {!!actionError && <Notice message={actionError} danger />}
         <View style={s.between}>
-          <Text style={s.eyebrow}>SAVED / {machines.length}</Text>
+          <Text style={s.eyebrow}>saved · {machines.length}</Text>
           <Button
-            title="Add manually"
+            title="add manually"
             variant="secondary"
             disabled={busy || scanning}
             icon={<Plus size={15} color={c.text} />}
@@ -187,10 +185,7 @@ export function MachinesScreen() {
                 <View style={[s.row, { flex: 1 }]}>
                   <Laptop color={current ? c.accent : c.muted} size={22} />
                   <View style={{ flex: 1, gap: 4 }}>
-                    <Text
-                      numberOfLines={1}
-                      style={[s.heading, { fontSize: 18 }]}
-                    >
+                    <Text numberOfLines={1} style={s.heading}>
                       {machine.name}
                     </Text>
                     <Text
@@ -213,13 +208,15 @@ export function MachinesScreen() {
               {current ? (
                 <View style={[s.row, { gap: 7 }]}>
                   <Check size={15} color={c.accent} />
-                  <Text style={{ color: c.accent, fontSize: 12 }}>
+                  <Text
+                    style={{ color: c.accent, fontFamily: mono, fontSize: 12 }}
+                  >
                     Current machine
                   </Text>
                 </View>
               ) : (
                 <Button
-                  title={`Use ${machine.name}`}
+                  title={`use ${machine.name}`}
                   variant="secondary"
                   disabled={busy || scanning}
                   onPress={() => void select(machine.id)}
@@ -230,7 +227,7 @@ export function MachinesScreen() {
         })}
         {!machines.length && (
           <View style={s.card}>
-            <Text style={s.heading}>Your first connection</Text>
+            <Text style={s.heading}>your first connection</Text>
             <Text style={s.muted}>
               Add one computer manually. Its bridge can then discover other
               devices on your tailnet.
@@ -240,7 +237,7 @@ export function MachinesScreen() {
         <View style={[s.divider, { marginVertical: 4 }]} />
         <View style={s.row}>
           <Network size={21} color={c.accent} />
-          <Text style={s.heading}>Discover on Tailscale</Text>
+          <Text style={s.heading}>discover on tailscale</Text>
         </View>
         <Text style={s.muted}>
           {activeMachine
@@ -248,7 +245,7 @@ export function MachinesScreen() {
             : 'Discovery is available after you pair with a computer running the bridge.'}
         </Text>
         <Button
-          title={scanned ? 'Refresh discovered devices' : 'Discover devices'}
+          title={scanned ? 'refresh discovered devices' : 'discover devices'}
           variant="secondary"
           disabled={!client || busy}
           busy={scanning}
@@ -257,13 +254,13 @@ export function MachinesScreen() {
         />
         {!!scanError && <Notice message={scanError} danger />}
         {scanned && (
-          <Text style={s.eyebrow}>VISIBLE DEVICES / {peers.length}</Text>
+          <Text style={s.eyebrow}>visible devices · {peers.length}</Text>
         )}
         {peers.map((peer) => (
           <View key={peer.id} style={s.card}>
             <View style={s.between}>
               <View style={{ flex: 1, gap: 3 }}>
-                <Text numberOfLines={1} style={[s.heading, { fontSize: 17 }]}>
+                <Text numberOfLines={1} style={s.heading}>
                   {peer.name}
                 </Text>
                 <Text style={s.muted}>
@@ -285,7 +282,7 @@ export function MachinesScreen() {
               </Text>
             )}
             <Button
-              title={`Add ${peer.name}`}
+              title={`add ${peer.name}`}
               variant="secondary"
               disabled={busy || scanning}
               onPress={() => addPeer(peer)}
@@ -312,7 +309,7 @@ export function MachinesScreen() {
       )}
       <Sheet
         visible={!!removing}
-        title="Remove saved machine?"
+        title="remove saved machine?"
         onClose={() => {
           if (!busy) setRemoving(null);
         }}
@@ -324,13 +321,13 @@ export function MachinesScreen() {
         </Text>
         {!!actionError && <Notice message={actionError} danger />}
         <Button
-          title="Remove machine"
+          title="remove machine"
           variant="danger"
           busy={busy}
           onPress={() => void confirmRemove()}
         />
         <Button
-          title="Keep machine"
+          title="keep machine"
           variant="secondary"
           disabled={busy}
           onPress={() => setRemoving(null)}

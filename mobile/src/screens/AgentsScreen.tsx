@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import {
   Pressable,
   RefreshControl,
@@ -11,22 +11,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChevronRight,
   CircleHelp,
-  Code,
-  Cpu,
-  GitFork,
-  MessageSquare,
   Plus,
   RefreshCw,
   Search,
   Settings2,
-  Terminal,
-  Zap,
 } from 'lucide-react-native';
 import { useSession } from '@/lib/session-context';
 import { useSnapshot } from '@/hooks/useSnapshot';
 import type { Pane } from '@/lib/types';
 import { errorMessage } from '@/lib/errors';
 import { attentionOrder, cleanTitle, shortPath } from '@/lib/sessions';
+import { statusMark } from '@/lib/status';
 import {
   Button,
   c,
@@ -35,37 +30,18 @@ import {
   Loading,
   mono,
   Notice,
+  radius,
   s,
   Screen,
   Sheet,
   Status,
+  tint,
+  toneColor,
 } from '@/components/ui';
 import { StartAgentModal } from './StartAgentModal';
 import { NewSessionSheet } from './NewSessionSheet';
 
 type StatusFilter = 'working' | 'blocked' | null;
-
-const kindIconMap: Record<string, React.FC<{ size: number; color: string }>> = {
-  codex: Code,
-  claude: MessageSquare,
-  gemini: Zap,
-  opencode: GitFork,
-  cursor: Cpu,
-  copilot: Terminal,
-};
-
-function KindIcon({
-  kind,
-  size = 17,
-  color = c.accent,
-}: {
-  kind: string | null;
-  size?: number;
-  color?: string;
-}) {
-  const Icon = kindIconMap[kind ?? ''] ?? Terminal;
-  return <Icon size={size} color={color} />;
-}
 
 export function AgentsScreen() {
   const { connection, activeMachine, forget, busy } = useSession();
@@ -120,7 +96,7 @@ export function AgentsScreen() {
   return (
     <Screen>
       <ScrollView
-        contentContainerStyle={[s.page, { paddingTop: 18, paddingBottom: 110 }]}
+        contentContainerStyle={[s.page, { paddingTop: 12, paddingBottom: 110 }]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
@@ -128,95 +104,73 @@ export function AgentsScreen() {
             onRefresh={pull}
             tintColor={c.accent}
             colors={[c.accent]}
+            progressBackgroundColor={c.panel}
           />
         }
       >
         <View style={s.between}>
-          <View style={s.row}>
-            <GitFork size={23} color={c.accent} />
-            <Text style={[s.heading, { fontSize: 22, letterSpacing: -0.8 }]}>
-              Herd Remote
-            </Text>
+          <View style={{ flex: 1, gap: 2 }}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Manage machines"
+              onPress={() => router.push('/machines')}
+              style={[s.row, { gap: 6, minHeight: 28 }]}
+            >
+              <Text
+                style={{
+                  color: connected ? c.green : c.amber,
+                  fontFamily: mono,
+                  fontSize: 11,
+                }}
+              >
+                {connected ? '●' : '○'}
+              </Text>
+              <Text numberOfLines={1} style={[s.eyebrow, { flexShrink: 1 }]}>
+                {activeMachine?.name ??
+                  connection?.url.replace(/^https?:\/\//, '')}{' '}
+                · {connected ? 'connected' : loading ? 'connecting' : 'offline'}
+              </Text>
+              <ChevronRight size={14} color={c.dim} />
+            </Pressable>
+            <Text style={s.title}>herd remote</Text>
           </View>
+          <IconButton label="Refresh agents" onPress={refresh} size={40}>
+            <RefreshCw size={17} color={c.accent} />
+          </IconButton>
           <IconButton
             label="Connection settings"
             onPress={() => setSettings(true)}
+            size={40}
           >
-            <Settings2 size={20} color={c.muted} />
-          </IconButton>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Manage machines"
-          onPress={() => router.push('/machines')}
-          style={[s.row, { gap: 7, minHeight: 44 }]}
-        >
-          <View
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 3,
-              backgroundColor: connected ? c.accent : c.amber,
-            }}
-          />
-          <Text
-            numberOfLines={1}
-            style={[s.muted, { fontFamily: mono, fontSize: 11, flex: 1 }]}
-          >
-            {activeMachine?.name ?? connection?.url.replace(/^https?:\/\//, '')}{' '}
-            · {connected ? 'connected' : loading ? 'connecting' : 'offline'}
-          </Text>
-          <ChevronRight size={16} color={c.muted} />
-        </Pressable>
-        <View style={[s.between, { marginTop: 3 }]}>
-          <View style={{ gap: 4 }}>
-            <Text style={s.eyebrow}>MISSION CONTROL</Text>
-            <Text style={s.title}>
-              Your agents<Text style={{ color: c.accent }}>.</Text>
-            </Text>
-          </View>
-          <IconButton label="Refresh agents" onPress={refresh}>
-            <RefreshCw size={19} color={c.accent} />
+            <Settings2 size={18} color={c.muted} />
           </IconButton>
         </View>
         {!!data && (
-          <View
-            style={[
-              s.row,
-              {
-                gap: 0,
-                borderBottomWidth: 1,
-                borderTopWidth: 1,
-                borderColor: c.line,
-                paddingTop: 17,
-                paddingBottom: 13,
-              },
-            ]}
-          >
+          <View style={[s.row, { gap: 8 }]}>
             {(
               [
                 {
-                  label: 'TOTAL',
+                  label: 'all',
                   filter: null,
                   count: data.agents.length,
                   color: c.text,
                 },
                 {
-                  label: 'WORKING',
+                  label: '◐ working',
                   filter: 'working',
                   count: data.agents.filter((a) => a.status === 'working')
                     .length,
-                  color: c.accent,
+                  color: c.amber,
                 },
                 {
-                  label: 'NEED INPUT',
+                  label: '● input',
                   filter: 'blocked',
                   count: data.agents.filter((a) => a.status === 'blocked')
                     .length,
-                  color: c.amber,
+                  color: c.red,
                 },
               ] as const
-            ).map((item, i) => {
+            ).map((item) => {
               const selected = statusFilter === item.filter;
               return (
                 <Pressable
@@ -224,7 +178,7 @@ export function AgentsScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={
                     item.filter
-                      ? `Show only ${item.label.toLowerCase()}, ${item.count}`
+                      ? `Show only ${item.filter === 'blocked' ? 'agents needing input' : 'working agents'}, ${item.count}`
                       : `Show all agents, ${item.count}`
                   }
                   accessibilityState={{ selected }}
@@ -235,45 +189,36 @@ export function AgentsScreen() {
                   }
                   style={({ pressed }) => ({
                     flex: 1,
-                    paddingLeft: i ? 18 : 0,
-                    borderLeftWidth: i ? 1 : 0,
-                    borderColor: c.line,
-                    gap: 4,
+                    backgroundColor: c.panel,
+                    borderRadius: radius,
+                    paddingVertical: 8,
+                    paddingHorizontal: 10,
+                    borderBottomWidth: 2,
+                    borderBottomColor:
+                      selected && data.agents.length ? c.accent : c.panel,
                     opacity: pressed ? 0.6 : 1,
                   })}
                 >
                   <Text
-                    style={{
-                      fontSize: 28,
-                      color: item.color,
-                      fontWeight: '500',
-                    }}
-                  >
-                    {String(item.count).padStart(2, '0')}
-                  </Text>
-                  <Text
+                    numberOfLines={1}
                     style={[
                       s.eyebrow,
-                      {
-                        fontSize: 9,
-                        letterSpacing: 1,
-                        color: selected ? item.color : c.muted,
-                      },
+                      { color: item.filter ? item.color : c.dim },
                     ]}
                   >
                     {item.label}
                   </Text>
-                  <View
+                  <Text
                     style={{
-                      height: 2,
-                      width: 22,
-                      borderRadius: 1,
-                      backgroundColor:
-                        selected && data.agents.length
-                          ? item.color
-                          : 'transparent',
+                      color: c.text,
+                      fontFamily: mono,
+                      fontSize: 20,
+                      lineHeight: 26,
+                      fontWeight: '700',
                     }}
-                  />
+                  >
+                    {item.count}
+                  </Text>
                 </Pressable>
               );
             })}
@@ -282,28 +227,30 @@ export function AgentsScreen() {
         {!!error && <Notice message={errorMessage(error)} danger />}
         <View style={{ position: 'relative' }}>
           <Field
-            placeholder="Find an agent or directory"
+            placeholder="find an agent or folder"
             value={search}
             onChangeText={setSearch}
-            style={{ paddingLeft: 42 }}
+            style={{ paddingLeft: 38 }}
           />
           <View
             pointerEvents="none"
-            style={{ position: 'absolute', left: 14, top: 17 }}
+            style={{ position: 'absolute', left: 12, top: 15 }}
           >
-            <Search size={17} color={c.muted} />
+            <Search size={16} color={c.dim} />
           </View>
         </View>
         {!!data && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8 }}
+            contentContainerStyle={{ gap: 6 }}
           >
             <Button
-              title="All workspaces"
+              title="all"
+              accessibilityLabel="All workspaces"
               variant={workspace === null ? 'primary' : 'secondary'}
               onPress={() => setWorkspace(null)}
+              style={chip}
             />
             {data.workspaces.map((item) => (
               <Button
@@ -311,6 +258,7 @@ export function AgentsScreen() {
                 title={item.label}
                 variant={workspace === item.id ? 'primary' : 'secondary'}
                 onPress={() => setWorkspace(item.id)}
+                style={chip}
               />
             ))}
           </ScrollView>
@@ -321,154 +269,178 @@ export function AgentsScreen() {
           </View>
         ) : (
           <>
-            <View style={s.between}>
-              <Text style={s.eyebrow}>AGENTS / {agents.length}</Text>
+            <View style={[s.between, { marginBottom: -8 }]}>
+              <Text style={s.eyebrow}>agents · {agents.length}</Text>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="About agent status"
                 onPress={() => setHelp(true)}
-                style={[s.row, { minHeight: 44, gap: 5 }]}
+                style={[s.row, { minHeight: 40, gap: 5 }]}
               >
-                <CircleHelp color={c.muted} size={14} />
-                <Text style={s.muted}>Status guide</Text>
+                <CircleHelp color={c.dim} size={13} />
+                <Text style={s.eyebrow}>status guide</Text>
               </Pressable>
             </View>
-            {agents.map((agent) => {
-              const project = workspaceLabel(agent.workspaceId);
-              const heading = agent.name ?? project;
-              const task = cleanTitle(agent.title);
-              const meta = [
-                agent.kind ?? 'agent',
-                agent.name ? project : null,
-                shortPath(agent.cwd),
-              ]
-                .filter(Boolean)
-                .join(' · ');
-              return (
-                <Pressable
-                  key={agent.paneId}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open ${heading}, ${agent.kind ?? 'agent'}, ${agent.status === 'blocked' ? 'needs input' : agent.status}`}
-                  onPress={() => openTerminal(agent.paneId)}
-                  style={({ pressed }) => [
-                    s.card,
-                    {
-                      padding: 14,
-                      gap: 7,
-                      opacity: pressed ? 0.7 : 1,
-                      borderLeftWidth: 3,
-                      borderLeftColor:
-                        agent.status === 'blocked'
-                          ? c.amber
-                          : agent.status === 'working'
-                            ? c.accent
-                            : c.line,
-                    },
-                  ]}
-                >
-                  <View style={s.between}>
-                    <View style={[s.row, { flex: 1, gap: 10 }]}>
-                      <View
+            <View style={{ gap: 2 }}>
+              {agents.map((agent) => {
+                const project = workspaceLabel(agent.workspaceId);
+                const heading = agent.name ?? project;
+                const task = cleanTitle(agent.title);
+                const mark = statusMark(agent.status);
+                const meta = [
+                  agent.kind ?? 'agent',
+                  agent.name ? project : null,
+                  shortPath(agent.cwd),
+                ]
+                  .filter(Boolean)
+                  .join(' · ');
+                const attention = agent.status === 'blocked';
+                return (
+                  <Pressable
+                    key={agent.paneId}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${heading}, ${agent.kind ?? 'agent'}, ${mark.label}`}
+                    onPress={() => openTerminal(agent.paneId)}
+                    style={({ pressed }) => [
+                      s.item,
+                      attention && {
+                        backgroundColor: tint(c.red, 0.08),
+                        borderLeftColor: c.red,
+                      },
+                      pressed && s.selected,
+                    ]}
+                  >
+                    <View style={[s.row, { gap: 8 }]}>
+                      <Text
                         style={{
-                          width: 30,
-                          height: 30,
-                          backgroundColor: c.elevated,
-                          borderRadius: 9,
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          color: toneColor(mark.tone),
+                          fontFamily: mono,
+                          fontSize: 14,
+                          width: 14,
+                          textAlign: 'center',
                         }}
                       >
-                        <KindIcon
-                          kind={agent.kind}
-                          size={15}
-                          color={c.accent}
-                        />
-                      </View>
+                        {mark.glyph}
+                      </Text>
                       <Text
                         numberOfLines={1}
-                        style={[s.heading, { fontSize: 16, flex: 1 }]}
+                        style={[s.body, { fontWeight: '700', flex: 1 }]}
                       >
                         {heading}
                       </Text>
                     </View>
-                    <Status status={agent.status} />
-                  </View>
-                  {!!task && (
+                    {!!task && (
+                      <Text
+                        numberOfLines={1}
+                        style={[s.muted, { color: c.text, paddingLeft: 22 }]}
+                      >
+                        {task}
+                      </Text>
+                    )}
                     <Text
                       numberOfLines={1}
-                      style={{ color: c.text, fontSize: 13, lineHeight: 18 }}
+                      ellipsizeMode="middle"
+                      style={[
+                        s.eyebrow,
+                        { paddingLeft: 22, letterSpacing: 0, fontSize: 10.5 },
+                      ]}
                     >
-                      {task}
+                      {meta}
                     </Text>
-                  )}
-                  <Text
-                    numberOfLines={1}
-                    ellipsizeMode="middle"
-                    style={[
-                      s.muted,
-                      { fontFamily: mono, fontSize: 10, lineHeight: 14 },
-                    ]}
-                  >
-                    {meta}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                  </Pressable>
+                );
+              })}
+            </View>
             {!agents.length && (
               <View style={s.card}>
                 <Text style={s.heading}>
-                  {filtered ? 'No matching agents' : 'Room for your next idea.'}
+                  {filtered ? 'no matching agents' : 'room for your next idea'}
                 </Text>
                 <Text style={s.muted}>
                   {filtered
                     ? 'Try another search, status or workspace.'
-                    : 'Your running Herdr agents appear here. Tap New session to start one in a project.'}
+                    : 'Your running Herdr agents appear here. Tap new to start one in a project, or open a terminal.'}
                 </Text>
               </View>
             )}
             {!!panes.length && (
               <>
-                <Text style={[s.eyebrow, { marginTop: 8 }]}>
-                  OTHER TERMINALS / {panes.length}
+                <Text style={[s.eyebrow, { marginBottom: -8 }]}>
+                  terminals · {panes.length}
                 </Text>
-                {panes.map((pane) => (
-                  <View key={pane.id} style={[s.card, { padding: 14 }]}>
-                    <Pressable
-                      accessibilityRole="button"
-                      onPress={() => openTerminal(pane.id, true)}
-                      style={s.between}
-                    >
-                      <View style={{ flex: 1, gap: 5 }}>
-                        <Text style={s.body}>
-                          {pane.label ?? pane.title ?? 'Terminal'}{' '}
-                          <Text style={s.muted}>· {pane.id}</Text>
-                        </Text>
-                        <Text numberOfLines={1} style={s.muted}>
+                <View style={{ gap: 2 }}>
+                  {panes.map((pane) => (
+                    <View key={pane.id} style={[s.item, { gap: 6 }]}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open terminal ${pane.label ?? pane.title ?? pane.id}`}
+                        onPress={() => openTerminal(pane.id, true)}
+                        style={({ pressed }) => [
+                          { gap: 3, borderRadius: 2 },
+                          pressed && { backgroundColor: c.select },
+                        ]}
+                      >
+                        <View style={[s.row, { gap: 8 }]}>
+                          <Text
+                            style={{
+                              color: c.accent,
+                              fontFamily: mono,
+                              fontSize: 14,
+                              width: 14,
+                              textAlign: 'center',
+                            }}
+                          >
+                            $
+                          </Text>
+                          <Text
+                            numberOfLines={1}
+                            style={[s.body, { fontWeight: '700', flex: 1 }]}
+                          >
+                            {pane.label ?? pane.title ?? 'terminal'}{' '}
+                            <Text style={[s.eyebrow, { fontWeight: '400' }]}>
+                              {pane.id}
+                            </Text>
+                          </Text>
+                          <ChevronRight size={15} color={c.dim} />
+                        </View>
+                        <Text
+                          numberOfLines={1}
+                          ellipsizeMode="middle"
+                          style={[
+                            s.eyebrow,
+                            {
+                              paddingLeft: 22,
+                              letterSpacing: 0,
+                              fontSize: 10.5,
+                            },
+                          ]}
+                        >
                           {workspaceLabel(pane.workspaceId)} ·{' '}
-                          {pane.cwd ?? 'Shell'}
+                          {shortPath(pane.cwd) ?? 'shell'}
                         </Text>
-                      </View>
-                      <ChevronRight size={18} color={c.muted} />
-                    </Pressable>
-                    {!pane.kind && (
-                      <Button
-                        title="Start an agent here"
-                        variant="secondary"
-                        onPress={() => setStartPane(pane)}
-                        icon={<Plus size={16} color={c.text} />}
-                      />
-                    )}
-                  </View>
-                ))}
+                      </Pressable>
+                      {!pane.kind && (
+                        <Button
+                          title="start an agent here"
+                          accessibilityLabel="Start an agent here"
+                          variant="secondary"
+                          onPress={() => setStartPane(pane)}
+                          icon={<Plus size={15} color={c.text} />}
+                          style={{ ...chip, marginLeft: 22 }}
+                        />
+                      )}
+                    </View>
+                  ))}
+                </View>
               </>
             )}
             <Text
               style={[
                 s.eyebrow,
-                { fontSize: 9, textAlign: 'center', paddingVertical: 10 },
+                { fontSize: 10, textAlign: 'center', paddingVertical: 10 },
               ]}
             >
-              RUNNING ON YOUR MACHINE. CONNECTED BY YOU.
+              running on your machine. connected by you.
             </Text>
           </>
         )}
@@ -478,26 +450,17 @@ export function AgentsScreen() {
           pointerEvents="box-none"
           style={{
             position: 'absolute',
-            right: 20,
+            right: 16,
             // Absolute children ignore the safe-area padding; clear the nav bar.
             bottom: insets.bottom + 16,
           }}
         >
           <Button
-            title="New session"
-            accessibilityLabel="Start a new session in a project"
-            icon={<Plus size={18} color={c.ink} />}
+            title="new"
+            accessibilityLabel="Start a new session or terminal"
+            icon={<Plus size={17} color={c.ink} />}
             onPress={() => setNewSession(true)}
-            style={{
-              borderRadius: 18,
-              paddingHorizontal: 20,
-              minHeight: 54,
-              elevation: 6,
-              shadowColor: '#000',
-              shadowOpacity: 0.4,
-              shadowRadius: 12,
-              shadowOffset: { width: 0, height: 6 },
-            }}
+            style={{ minHeight: 48, paddingHorizontal: 18, elevation: 4 }}
           />
         </View>
       )}
@@ -526,7 +489,7 @@ export function AgentsScreen() {
       )}
       <Sheet
         visible={settings}
-        title="Your connection"
+        title="your connection"
         onClose={() => setSettings(false)}
       >
         <Text selectable style={s.body}>
@@ -537,7 +500,7 @@ export function AgentsScreen() {
         </Text>
         <Notice message="The bridge can control this Herdr session. Keep your pairing token private and keep both devices on your trusted tailnet." />
         <Button
-          title="Manage machines"
+          title="manage machines"
           variant="secondary"
           onPress={() => {
             setSettings(false);
@@ -546,7 +509,7 @@ export function AgentsScreen() {
         />
         {!!forgetError && <Notice message={forgetError} danger />}
         <Button
-          title="Forget connection"
+          title="forget connection"
           variant="danger"
           disabled={busy}
           onPress={() => {
@@ -564,7 +527,7 @@ export function AgentsScreen() {
       </Sheet>
       <Sheet
         visible={help}
-        title="Reading agent status"
+        title="reading agent status"
         onClose={() => setHelp(false)}
       >
         {[
@@ -577,7 +540,7 @@ export function AgentsScreen() {
           ['idle', 'The agent appears ready for input.'],
           ['unknown', 'Herdr cannot confidently classify this terminal.'],
         ].map(([status, description]) => (
-          <View key={status} style={{ gap: 8 }}>
+          <View key={status} style={{ gap: 6 }}>
             <Status status={status} />
             <Text style={s.muted}>{description}</Text>
           </View>
@@ -590,3 +553,9 @@ export function AgentsScreen() {
     </Screen>
   );
 }
+
+const chip = {
+  minHeight: 34,
+  paddingVertical: 6,
+  paddingHorizontal: 11,
+};

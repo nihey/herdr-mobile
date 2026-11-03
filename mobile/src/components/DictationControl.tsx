@@ -1,7 +1,7 @@
 import { Pressable, Text, View } from 'react-native';
 import { Mic, Square } from 'lucide-react-native';
 import { languageInfo, nextLanguage, type Language } from '@/lib/dictation';
-import { Button, c, mono, Notice, Sheet } from './ui';
+import { Button, c, mono, Notice, radius, Sheet, tint } from './ui';
 
 /** Language chip and mic button joined into one control beside the composer. */
 export function DictationControl({
@@ -24,9 +24,11 @@ export function DictationControl({
       style={{
         flexDirection: 'row',
         height: 42,
-        borderRadius: 12,
+        borderRadius: radius,
         overflow: 'hidden',
-        backgroundColor: listening ? '#3A2420' : c.elevated,
+        borderWidth: 1,
+        borderColor: listening ? tint(c.red, 0.4) : c.line,
+        backgroundColor: listening ? tint(c.red, 0.16) : c.panel,
         opacity: disabled && !listening ? 0.45 : 1,
       }}
     >
@@ -94,15 +96,24 @@ export function SpeechModelSheet({
   const name = language ? languageInfo(language).name : '';
   return (
     <Sheet
-      title={`Offline ${name} speech`}
+      title={`offline ${name.toLowerCase()} speech`}
       visible={!!language}
       onClose={onClose}
     >
       <Notice
         message={`This phone has not downloaded Android's offline ${name} speech model yet. Dictation only runs on the phone, so it needs this one-time download.`}
       />
-      <Button title={`Download ${name}`} onPress={onDownload} />
-      <Button title="Not now" variant="secondary" onPress={onClose} />
+      <Button
+        title={`download ${name.toLowerCase()}`}
+        accessibilityLabel={`Download ${name}`}
+        onPress={onDownload}
+      />
+      <Button
+        title="not now"
+        accessibilityLabel="Not now"
+        variant="secondary"
+        onPress={onClose}
+      />
     </Sheet>
   );
 }

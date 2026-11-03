@@ -42,7 +42,7 @@ export function PairMachineModal({
   };
   return (
     <Sheet
-      title="Add a machine"
+      title="add a machine"
       visible
       onClose={() => {
         if (!busy) onClose();
@@ -53,7 +53,8 @@ export function PairMachineModal({
         token locally with npm run pairing -w bridge.
       </Text>
       <Field
-        label="Machine name"
+        label="machine name"
+        accessibilityLabel="Machine name"
         placeholder="e.g. Work laptop"
         value={name}
         onChangeText={setName}
@@ -61,7 +62,8 @@ export function PairMachineModal({
         editable={!busy}
       />
       <Field
-        label="Bridge address"
+        label="bridge address"
+        accessibilityLabel="Bridge address"
         placeholder="http://100.x.x.x:8787"
         value={url}
         onChangeText={setUrl}
@@ -70,7 +72,8 @@ export function PairMachineModal({
         editable={!busy}
       />
       <Field
-        label="Pairing token"
+        label="pairing token"
+        accessibilityLabel="Pairing token"
         placeholder="Token from this machine’s bridge"
         value={token}
         onChangeText={setToken}
@@ -81,7 +84,7 @@ export function PairMachineModal({
       />
       {!!error && <Notice message={error} danger />}
       <Button
-        title="Verify and add machine"
+        title="verify and add machine"
         busy={busy}
         disabled={!name.trim() || !url.trim() || !token.trim()}
         onPress={() => void pair()}

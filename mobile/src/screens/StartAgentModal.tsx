@@ -42,7 +42,7 @@ export function StartAgentModal({
   return (
     <Sheet
       visible={!!pane}
-      title="Start an agent"
+      title="start an agent"
       onClose={() => {
         if (!busy) onClose();
       }}
@@ -55,14 +55,15 @@ export function StartAgentModal({
         <Text style={s.muted}>{pane?.cwd ?? 'Shell working directory'}</Text>
       </View>
       <Field
-        label="Agent name"
+        label="agent name"
+        accessibilityLabel="Agent name"
         value={name}
         onChangeText={setName}
         placeholder="e.g. mobile-helper"
         editable={!busy}
         maxLength={32}
       />
-      <Text style={s.muted}>Agent kind</Text>
+      <Text style={s.muted}>agent kind</Text>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {kinds.map((item) => (
           <Button
@@ -75,7 +76,8 @@ export function StartAgentModal({
         ))}
       </View>
       <Field
-        label="Or enter another Herdr agent kind"
+        label="or enter another Herdr agent kind"
+        accessibilityLabel="Or enter another Herdr agent kind"
         value={kind}
         onChangeText={setKind}
         editable={!busy}
@@ -86,13 +88,13 @@ export function StartAgentModal({
       </Text>
       {!!error && <Notice message={error} danger />}
       <Button
-        title={busy ? 'Waiting for agent readiness…' : 'Start agent'}
+        title={busy ? 'waiting for agent readiness…' : 'start agent'}
         onPress={() => void start()}
         busy={busy}
         disabled={!/^[a-z][a-z0-9_-]{0,31}$/.test(name.trim()) || !kind.trim()}
       />
       {busy && (
-        <Text style={{ color: c.amber, fontSize: 12 }}>
+        <Text style={[s.muted, { color: c.amber }]}>
           Startup can take up to 30 seconds.
         </Text>
       )}

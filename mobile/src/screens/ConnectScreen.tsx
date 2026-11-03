@@ -1,12 +1,6 @@
 import { useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Text,
-  View,
-} from 'react-native';
-import { ArrowRight, GitFork, LockKeyhole, Network } from 'lucide-react-native';
+import { KeyboardAvoidingView, ScrollView, Text, View } from 'react-native';
+import { ArrowRight, LockKeyhole } from 'lucide-react-native';
 import { useSession } from '@/lib/session-context';
 import { errorMessage } from '@/lib/errors';
 import { Button, c, Field, Notice, s, Screen } from '@/components/ui';
@@ -36,46 +30,24 @@ export function ConnectScreen() {
   };
   return (
     <Screen>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+      {/* Edge-to-edge Android does not resize for the keyboard, so pad on both
+          platforms; the ScrollView then keeps the focused field in view. */}
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={[s.page, { flexGrow: 1, paddingTop: 40 }]}
+          contentContainerStyle={[s.page, { flexGrow: 1, paddingTop: 28 }]}
         >
-          <View style={[s.row, { marginBottom: 28 }]}>
-            <View
-              style={{
-                width: 52,
-                height: 52,
-                backgroundColor: c.accent,
-                borderRadius: 16,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <GitFork color={c.ink} size={28} />
-            </View>
-            <Text style={[s.heading, { fontSize: 25, letterSpacing: -1 }]}>
-              Herd Remote
-            </Text>
+          <View style={{ gap: 4, marginBottom: 8 }}>
+            <Text style={s.eyebrow}>unofficial herdr companion</Text>
+            <Text style={s.title}>herd remote</Text>
           </View>
-          <Text style={s.eyebrow}>YOUR AGENTS. WITH YOU.</Text>
-          <Text style={[s.title, { fontSize: 46, lineHeight: 51 }]}>
-            A little closer{'\n'}to your agents.
-          </Text>
-          <Text
-            style={[
-              s.muted,
-              { fontSize: 16, lineHeight: 24, marginBottom: 10 },
-            ]}
-          >
-            Pick up where your computer left off. An unofficial Herdr companion
-            that connects through your private network.
+          <Text style={[s.body, { color: c.muted }]}>
+            Your Herdr agents and terminals, from your phone. Connects to the
+            bridge on your computer through your private tailnet.
           </Text>
           <Field
-            label="Bridge address"
+            label="bridge address"
+            accessibilityLabel="Bridge address"
             placeholder="http://100.x.x.x:8787"
             keyboardType="url"
             value={url}
@@ -87,7 +59,7 @@ export function ConnectScreen() {
             <>
               <Notice message={storageError} danger />
               <Button
-                title="Retry saved machines"
+                title="retry saved machines"
                 variant="secondary"
                 onPress={() => {
                   void reload().catch(() =>
@@ -100,8 +72,9 @@ export function ConnectScreen() {
             </>
           )}
           <Field
-            label="Pairing token"
-            placeholder="Paste the token from your computer"
+            label="pairing token"
+            accessibilityLabel="Pairing token"
+            placeholder="paste the token from your computer"
             value={token}
             onChangeText={setToken}
             secureTextEntry
@@ -110,27 +83,27 @@ export function ConnectScreen() {
           />
           {!!error && <Notice message={error} danger />}
           <Button
-            title="Connect to Herdr"
+            title="connect"
+            accessibilityLabel="Connect to Herdr"
             onPress={() => void submit()}
             busy={busy}
             disabled={!url.trim() || !token.trim()}
-            icon={<ArrowRight size={18} color={c.ink} />}
+            icon={<ArrowRight size={17} color={c.ink} />}
           />
           <View style={{ flex: 1, minHeight: 12 }} />
           <View style={[s.card, { backgroundColor: 'transparent' }]}>
-            <View style={s.row}>
-              <Network size={19} color={c.accent} />
-              <Text style={s.body}>Same tailnet. Anywhere.</Text>
-            </View>
+            <Text style={[s.body, { fontWeight: '700' }]}>
+              same tailnet. anywhere.
+            </Text>
             <Text style={s.muted}>
-              Turn on Tailscale on your phone and computer. Run the Herdr Mobile
+              Turn on Tailscale on your phone and computer. Run the Herd Remote
               bridge on your computer, then enter its address and pairing token
               above.
             </Text>
             <View style={s.row}>
-              <LockKeyhole size={14} color={c.muted} />
-              <Text style={[s.muted, { fontSize: 11 }]}>
-                Your token stays in this device’s secure storage.
+              <LockKeyhole size={13} color={c.dim} />
+              <Text style={[s.eyebrow, { flex: 1 }]}>
+                your token stays in this device’s secure storage.
               </Text>
             </View>
           </View>
