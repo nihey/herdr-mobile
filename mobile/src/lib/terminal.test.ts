@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { newLineCount } from './terminal';
+import {
+  effectiveMode,
+  newLineCount,
+  nextMode,
+  runFailureNotice,
+} from './terminal';
 const lines = (from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, i) => `line ${from + i}`).join(
     '\n',
@@ -36,5 +41,22 @@ describe('new terminal line count', () => {
   });
   it('never reports a negative count', () => {
     expect(newLineCount('a\nb\nc\nd', 'a\nb')).toBe(0);
+  });
+});
+
+describe('composer modes', () => {
+  it('offers Run/Type without an agent and Prompt/Type with one', () => {
+    expect(effectiveMode('run', true)).toBe('prompt');
+    expect(effectiveMode('prompt', false)).toBe('run');
+    expect(effectiveMode('type', true)).toBe('type');
+    expect(effectiveMode('type', false)).toBe('type');
+    expect(nextMode('run', false)).toBe('type');
+    expect(nextMode('type', false)).toBe('run');
+    expect(nextMode('prompt', true)).toBe('type');
+    expect(nextMode('type', true)).toBe('prompt');
+  });
+  it('says a typed command was not run when Enter failed', () => {
+    expect(runFailureNotice(true)).toMatch(/typed.*not run/i);
+    expect(runFailureNotice(false)).toMatch(/may not have reached/i);
   });
 });

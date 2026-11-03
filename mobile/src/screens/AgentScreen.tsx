@@ -15,7 +15,13 @@ import { useHomeBack } from '@/hooks/useHomeBack';
 import { useDictation } from '@/hooks/useDictation';
 import { KEYS, OUTPUT, PROMPT, SEND_TEXT } from '@/lib/graphql';
 import { errorMessage } from '@/lib/errors';
-import { newLineCount } from '@/lib/terminal';
+import {
+  effectiveMode,
+  newLineCount,
+  nextMode,
+  runFailureNotice,
+  type ComposerMode,
+} from '@/lib/terminal';
 import { clearHandoff, peekHandoff } from '@/lib/handoff';
 import { languageInfo } from '@/lib/dictation';
 import type { Output } from '@/lib/types';
@@ -58,6 +64,27 @@ const keys = [
   { label: 'n', name: 'n', key: 'n' },
 ];
 
+const modeNames: Record<ComposerMode, string> = {
+  prompt: 'prompt',
+  run: 'run command',
+  type: 'type text',
+};
+const inputNames: Record<ComposerMode, string> = {
+  prompt: 'Agent prompt',
+  run: 'Command',
+  type: 'Terminal text',
+};
+const placeholders: Record<ComposerMode, string> = {
+  prompt: 'prompt · sends enter',
+  run: '$ command · runs with enter',
+  type: 'text · no enter',
+};
+const sendNames: Record<ComposerMode, string> = {
+  prompt: 'Send prompt',
+  run: 'Run command',
+  type: 'Type text into terminal',
+};
+
 function timeSinceLabel(date: string | undefined): string {
   if (!date) return '';
   const delta = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
@@ -77,10 +104,14 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
   const snapshot = useSnapshot();
   const agent = snapshot.data?.agents.find((item) => item.paneId === paneId);
   const pane = snapshot.data?.panes.find((item) => item.id === paneId);
+  // An agent started by hand in a plain shell gets the agent controls.
+  const hasAgent = !!agent;
 
   const [source, setSource] = useState<Source>('RECENT');
   const [draft, setDraft] = useState(handoff?.draft ?? '');
-  const [typeText, setTypeText] = useState(raw);
+  // Plain shells start in Run, agents in Prompt; Type never presses Enter.
+  const [mode, setMode] = useState<ComposerMode>(raw ? 'run' : 'prompt');
+  const composer = effectiveMode(mode, hasAgent);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(
     handoff?.notice ?? null,
@@ -141,21 +172,43 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
     // Send exactly what is on screen; a phrase still being recognized is dropped.
     dictation.cancel();
     const submitted = draft;
+    const sendMode = composer;
+    let enterFailed = false;
     void act(
-      () =>
-        client.mutate({
-          mutation: typeText ? SEND_TEXT : PROMPT,
-          variables: typeText
-            ? { paneId, text: submitted }
-            : { target: paneId, text: submitted },
-        }),
+      async () => {
+        if (sendMode === 'prompt') {
+          await client.mutate({
+            mutation: PROMPT,
+            variables: { target: paneId, text: submitted },
+          });
+          return;
+        }
+        await client.mutate({
+          mutation: SEND_TEXT,
+          variables: { paneId, text: submitted },
+        });
+        if (sendMode !== 'run') return;
+        // The text is in the terminal now; a failed Enter is never retried.
+        try {
+          await client.mutate({
+            mutation: KEYS,
+            variables: { target: paneId, keys: ['enter'], raw: true },
+          });
+        } catch {
+          enterFailed = true;
+        }
+      },
       () => {
         setDraft((value) => (value === submitted ? '' : value));
-        setSent(
-          typeText
-            ? 'Text sent. Use Enter to submit it in the terminal.'
-            : 'Prompt delivered to Herdr.',
-        );
+        if (enterFailed) setActionError(runFailureNotice(true));
+        else
+          setSent(
+            sendMode === 'run'
+              ? 'command sent.'
+              : sendMode === 'type'
+                ? 'text sent. tap enter to submit it.'
+                : 'prompt delivered.',
+          );
       },
     );
   };
@@ -165,7 +218,11 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
     void act(() =>
       client.mutate({
         mutation: KEYS,
-        variables: { target: paneId, keys: [key], raw: raw || typeText },
+        variables: {
+          target: paneId,
+          keys: [key],
+          raw: !hasAgent || composer === 'type',
+        },
       }),
     );
   };
@@ -195,7 +252,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
   const details = [agent?.kind ?? 'terminal', agent?.cwd ?? pane?.cwd]
     .filter(Boolean)
     .join(' · ');
-  const blocked = !raw && agent?.status === 'blocked';
+  const blocked = hasAgent && agent?.status === 'blocked';
   const offline = !!output.error || !output.data;
   const lineCount = shown ? shown.split('\n').length : 0;
   const jumpLabel =
@@ -417,7 +474,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
             ))}
           </ScrollView>
           <View style={{ paddingHorizontal: 12, paddingBottom: 8, gap: 6 }}>
-            {blocked && !typeText && (
+            {blocked && composer !== 'type' && (
               <Text
                 numberOfLines={1}
                 style={{
@@ -474,32 +531,24 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
               )
             )}
             <View style={[s.row, { gap: 8, alignItems: 'flex-end' }]}>
-              {!raw && (
-                <Button
-                  title={typeText ? 'Type' : 'Prompt'}
-                  accessibilityLabel={
-                    typeText
-                      ? 'Mode: type text. Switch to prompt'
-                      : 'Mode: prompt. Switch to type text'
-                  }
-                  variant="secondary"
-                  onPress={() => {
-                    setTypeText((value) => !value);
-                    setSent('');
-                  }}
-                  style={{
-                    minHeight: 42,
-                    minWidth: 76,
-                    paddingVertical: 8,
-                    paddingHorizontal: 11,
-                  }}
-                />
-              )}
+              <Button
+                title={composer}
+                accessibilityLabel={`Mode: ${modeNames[composer]}. Switch to ${modeNames[nextMode(composer, hasAgent)]}`}
+                variant="secondary"
+                onPress={() => {
+                  setMode(nextMode(composer, hasAgent));
+                  setSent('');
+                }}
+                style={{
+                  minHeight: 42,
+                  minWidth: 64,
+                  paddingVertical: 8,
+                  paddingHorizontal: 10,
+                }}
+              />
               <TextInput
-                accessibilityLabel={typeText ? 'Terminal text' : 'Agent prompt'}
-                placeholder={
-                  typeText ? 'Text · no Enter' : 'Prompt · sends Enter'
-                }
+                accessibilityLabel={inputNames[composer]}
+                placeholder={placeholders[composer]}
                 placeholderTextColor={c.dim}
                 multiline
                 value={draft}
@@ -540,11 +589,13 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                 onSwitchLanguage={dictation.switchLanguage}
               />
               <IconButton
-                label={typeText ? 'Type text into terminal' : 'Send prompt'}
+                label={sendNames[composer]}
                 onPress={send}
                 primary
                 busy={busy}
-                disabled={!draft.trim() || offline || (blocked && !typeText)}
+                disabled={
+                  !draft.trim() || offline || (blocked && composer === 'prompt')
+                }
                 size={42}
               >
                 <Send size={17} color={c.ink} />
