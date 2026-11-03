@@ -244,6 +244,66 @@ function sessionSetup({
   };
   return { calls, query };
 }
+function outputSetup({
+  maxOffset,
+  refuseRecent = false,
+}: {
+  /** The pane's scrollback (pane.get scroll.max_offset_from_bottom). */
+  maxOffset: number | null;
+  /** Herdr refuses recent reads of a working full-screen app. */
+  refuseRecent?: boolean;
+}) {
+  const calls: { method: string; params: Record<string, unknown> }[] = [];
+  const app = createBridge({
+    token,
+    request: async (method, params = {}) => {
+      calls.push({ method, params });
+      if (method === 'pane.get') {
+        if (maxOffset === null) throw new HerdrError('pane_not_found', 'nope');
+        return {
+          type: 'pane_info',
+          pane: {
+            pane_id: params.pane_id,
+            scroll: {
+              offset_from_bottom: 0,
+              max_offset_from_bottom: maxOffset,
+              viewport_rows: 40,
+            },
+          },
+        };
+      }
+      if (params.source !== 'visible' && refuseRecent)
+        throw new HerdrError(
+          'agent_not_idle',
+          'cannot read 300 lines while w1:p1 is working: its alternate-screen history can only be captured by scrolling while idle.',
+        );
+      return { read: { text: `${params.source} text` } };
+    },
+  });
+  const query = async (raw: boolean) => {
+    const response = await app(
+      new Request('http://localhost/graphql', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          query: `{ output(target: "w1:p1", source: RECENT, lines: 300, raw: ${raw}) { text } }`,
+        }),
+      }),
+    );
+    return (await response.json()) as {
+      data?: { output: { text: string } };
+      errors?: unknown[];
+    };
+  };
+  const reads = () =>
+    calls
+      .filter((c) => c.method === 'agent.read' || c.method === 'pane.read')
+      .map((c) => c.params.source);
+  return { query, reads };
+}
 describe('authenticated GraphQL bridge', () => {
   it('requires authentication before discovery and returns only declared fields', async () => {
     let discoveries = 0;
@@ -367,13 +427,38 @@ describe('authenticated GraphQL bridge', () => {
     });
     expect(body.data.session.workspaces[0].id).toBe('w1');
   });
+  it('reads the screen of a full-screen app instead of scrolling it for history', async () => {
+    for (const raw of [false, true]) {
+      const { query, reads } = outputSetup({ maxOffset: 0 });
+      const body = await query(raw);
+      expect(body.errors).toBeUndefined();
+      expect(body.data?.output.text).toBe('visible text');
+      expect(reads()).toEqual(['visible']);
+    }
+  });
+  it('reads recent history when the pane has scrollback', async () => {
+    const { query, reads } = outputSetup({ maxOffset: 162 });
+    const body = await query(false);
+    expect(body.data?.output.text).toBe('recent_unwrapped text');
+    expect(reads()).toEqual(['recent_unwrapped']);
+  });
+  it('shows the screen when Herdr refuses a working full-screen read', async () => {
+    const { query, reads } = outputSetup({
+      maxOffset: null,
+      refuseRecent: true,
+    });
+    const body = await query(false);
+    expect(body.errors).toBeUndefined();
+    expect(body.data?.output.text).toBe('visible text');
+    expect(reads()).toEqual(['recent_unwrapped', 'visible']);
+  });
   it('maps output reads using the installed schema source enum', async () => {
     const { query, calls } = setup();
     const { body } = await query(
       '{ output(target: "w1:p1", source: RECENT, lines: 120) { text } }',
     );
     expect(body.data.output.text).toBe('terminal output');
-    expect(calls[0]).toEqual({
+    expect(calls.find((c) => c.method === 'agent.read')).toEqual({
       method: 'agent.read',
       params: {
         target: 'w1:p1',

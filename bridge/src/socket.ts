@@ -36,6 +36,7 @@ export class HerdrClient {
         'session.snapshot',
         'server.agent_manifests',
         'pane.process_info',
+        'pane.get',
         'agent.get',
         'agent.list',
         'agent.read',

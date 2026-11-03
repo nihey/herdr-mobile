@@ -136,6 +136,18 @@ export function buildSchema(
       return null;
     }
   }
+  /** Whether the pane has no scrollback (a fresh shell or a full-screen app). */
+  async function noScrollback(paneId: string) {
+    try {
+      const result = await request('pane.get', { pane_id: paneId });
+      const scroll = (result.pane as RecordValue | undefined)?.scroll as
+        RecordValue | undefined;
+      return scroll?.max_offset_from_bottom === 0;
+    } catch {
+      // Unknown (e.g. an agent name instead of a pane ID): read as asked.
+      return false;
+    }
+  }
   /**
    * A new tab's shell runs its startup scripts first, and Herdr only starts an
    * agent once the shell idles alone at its prompt. Wait for that (read-only)
@@ -407,15 +419,39 @@ export function buildSchema(
           target(args.target);
           if (args.lines < 1 || args.lines > 1000)
             badInput('Choose between 1 and 1000 lines.');
-          const result = await call(args.raw ? 'pane.read' : 'agent.read', {
-            [args.raw ? 'pane_id' : 'target']: args.target,
-            source: args.source === 'VISIBLE' ? 'visible' : 'recent_unwrapped',
-            lines: args.lines,
-            format: 'text',
-            strip_ansi: true,
-          });
-          const read = result.read as { text: string };
-          return { text: read.text, fetchedAt: new Date().toISOString() };
+          const read = (source: 'visible' | 'recent_unwrapped') =>
+            call(args.raw ? 'pane.read' : 'agent.read', {
+              [args.raw ? 'pane_id' : 'target']: args.target,
+              source,
+              lines: args.lines,
+              format: 'text',
+              strip_ansi: true,
+            });
+          // Full-screen apps (the alternate screen, e.g. Claude's TUI) keep no
+          // scrollback. Herdr can only collect their history by scrolling the
+          // app with mouse-wheel events, which moves it on the user's desktop
+          // when idle and is refused while working. Everything they have is on
+          // screen, so read the screen instead.
+          let source: 'visible' | 'recent_unwrapped' =
+            args.source === 'VISIBLE' || (await noScrollback(args.target))
+              ? 'visible'
+              : 'recent_unwrapped';
+          let result: RecordValue;
+          try {
+            result = await read(source);
+          } catch (error) {
+            // The pane switched to a full-screen app after the check.
+            if (
+              source === 'visible' ||
+              !(error instanceof GraphQLError) ||
+              error.extensions.code !== 'agent_not_idle'
+            )
+              throw error;
+            source = 'visible';
+            result = await read(source);
+          }
+          const text = (result.read as { text: string }).text;
+          return { text, fetchedAt: new Date().toISOString() };
         },
       },
       Mutation: {
