@@ -50,5 +50,18 @@ export function loadConfig() {
     socketPath:
       process.env.HERDR_SOCKET_PATH ??
       resolve(homedir(), '.config/herdr/herdr.sock'),
+    /** Hermes's own virtualenv Python, which runs bridge/hermes/host.py. */
+    hermesPython:
+      process.env.HERDR_MOBILE_HERMES_PYTHON ??
+      resolve(homedir(), '.hermes/hermes-agent/venv/bin/python'),
+    /** Session ID and verified model only; never conversation text. */
+    hermesStateFile: resolve(
+      process.env.HERDR_MOBILE_HERMES_STATE ?? '../.local/hermes-state.json',
+    ),
+    /** Codex's config, for the coordinator's model. */
+    codexConfig: resolve(
+      process.env.CODEX_HOME ?? resolve(homedir(), '.codex'),
+      'config.toml',
+    ),
   };
 }

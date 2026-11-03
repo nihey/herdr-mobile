@@ -3,6 +3,7 @@ import { GraphQLError } from 'graphql';
 import { createSchema } from 'graphql-yoga';
 import { HerdrError } from './socket.js';
 import type { DiscoveredMachine } from './discovery.js';
+import { CoordinatorError, type Coordinator } from './hermes/coordinator.js';
 import {
   createActions,
   defaultStartTiming,
@@ -46,8 +47,13 @@ export function buildSchema(
   discover?: () => Promise<DiscoveredMachine[]>,
   timing: StartTiming = defaultStartTiming,
   homeDir: string = homedir(),
+  hermes?: Coordinator,
 ) {
   const actions = createActions(request, timing, homeDir);
+  const hermesError = (error: unknown) =>
+    error instanceof CoordinatorError
+      ? new GraphQLError(error.message, { extensions: { code: error.code } })
+      : error;
   const { call } = actions;
   return createSchema({
     typeDefs: /* GraphQL */ `
@@ -118,6 +124,43 @@ export function buildSchema(
         "True once the shell sat alone at its prompt; false if that is unknown."
         ready: Boolean!
       }
+      enum HermesStatus {
+        STARTING
+        READY
+        UNAVAILABLE
+      }
+      enum HermesRole {
+        USER
+        HERMES
+      }
+      enum HermesChipKind {
+        READ
+        SENT
+        STARTED
+      }
+      "An agent Hermes read, messaged or started, as the bridge recorded it."
+      type HermesChip {
+        kind: HermesChipKind!
+        paneId: ID!
+        title: String
+      }
+      type HermesMessage {
+        id: ID!
+        role: HermesRole!
+        text: String!
+        chips: [HermesChip!]!
+        stopped: Boolean!
+        at: String!
+      }
+      "The Hermes coordinator conversation on this computer."
+      type Hermes {
+        status: HermesStatus!
+        reason: String
+        model: String
+        modelNote: String
+        working: Boolean!
+        messages(last: Int = 100): [HermesMessage!]!
+      }
       type DiscoveredMachine {
         id: ID!
         name: String!
@@ -133,6 +176,7 @@ export function buildSchema(
         agentKinds: [String!]!
         "The bridge user's home folder, where home terminals open."
         homeFolder: String
+        hermes: Hermes!
         output(
           target: ID!
           source: OutputSource = RECENT
@@ -157,6 +201,11 @@ export function buildSchema(
         ): StartedSession!
         "A plain shell in a new tab. Without a workspace, in the home workspace."
         startTerminal(workspaceId: ID): StartedTerminal!
+        "One message to Hermes; refused while it is still answering. Never retried."
+        hermesSend(text: String!): ActionResult!
+        hermesStop: ActionResult!
+        "Starts a fresh Hermes conversation."
+        hermesNew: ActionResult!
       }
     `,
     resolvers: {
@@ -205,6 +254,15 @@ export function buildSchema(
           return [...new Set(kinds)];
         },
         homeFolder: () => homeDir,
+        hermes: () =>
+          hermes?.conversation() ?? {
+            status: 'unavailable',
+            reason: 'Hermes is not set up on this bridge.',
+            model: null,
+            modelNote: null,
+            working: false,
+            messages: [],
+          },
         output: async (
           _: unknown,
           args: {
@@ -282,7 +340,47 @@ export function buildSchema(
           _: unknown,
           args: { workspaceId?: string | null },
         ) => actions.startTerminal(args.workspaceId ?? null),
+        hermesSend: (_: unknown, args: { text: string }) => {
+          if (!args.text.trim() || Buffer.byteLength(args.text) > 16 * 1024)
+            badInput('Enter a message shorter than 16 KiB.');
+          if (!hermes)
+            throw new GraphQLError('Hermes is not set up on this bridge.', {
+              extensions: { code: 'hermes_unavailable' },
+            });
+          try {
+            hermes.send(args.text);
+          } catch (error) {
+            throw hermesError(error);
+          }
+          return { ok: true };
+        },
+        hermesStop: () => {
+          hermes?.stop();
+          return { ok: true };
+        },
+        hermesNew: async () => {
+          if (!hermes)
+            throw new GraphQLError('Hermes is not set up on this bridge.', {
+              extensions: { code: 'hermes_unavailable' },
+            });
+          try {
+            await hermes.reset();
+          } catch (error) {
+            throw hermesError(error);
+          }
+          return { ok: true };
+        },
       },
+      Hermes: {
+        status: (h: { status: string }) => h.status.toUpperCase(),
+        messages: (h: { messages: unknown[] }, args: { last: number }) => {
+          if (args.last < 1 || args.last > 200)
+            badInput('Choose between 1 and 200 messages.');
+          return h.messages.slice(-args.last);
+        },
+      },
+      HermesMessage: { role: (m: { role: string }) => m.role.toUpperCase() },
+      HermesChip: { kind: (c: { kind: string }) => c.kind.toUpperCase() },
       Workspace: { id: field('workspace_id'), status: field('agent_status') },
       Tab: { id: field('tab_id'), workspaceId: field('workspace_id') },
       Agent: {

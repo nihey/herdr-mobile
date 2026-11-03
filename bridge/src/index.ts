@@ -1,9 +1,19 @@
+import { randomBytes } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { homedir } from 'node:os';
 import { Readable } from 'node:stream';
+import { createActions, defaultStartTiming } from './actions.js';
 import { loadConfig } from './config.js';
 import { createBridge } from './server.js';
 import { HerdrClient } from './socket.js';
 import { createDiscovery } from './discovery.js';
+import {
+  COORDINATOR_INSTRUCTIONS,
+  createCoordinator,
+} from './hermes/coordinator.js';
+import { spawnHost } from './hermes/host.js';
+import { createTools } from './hermes/tools.js';
 
 const config = loadConfig();
 if (process.argv.includes('--pairing')) {
@@ -12,10 +22,32 @@ if (process.argv.includes('--pairing')) {
   );
 } else {
   const client = new HerdrClient(config.socketPath);
+  const request = client.request.bind(client);
+  // Hermes starts lazily, the first time the app asks for the conversation.
+  const hermes = createCoordinator({
+    spawn: () =>
+      existsSync(config.hermesPython)
+        ? spawnHost({ python: config.hermesPython })
+        : null,
+    tools: createTools(
+      createActions(request, defaultStartTiming, homedir()),
+      (kind) => `${kind}-${randomBytes(2).toString('hex')}`,
+    ),
+    stateFile: config.hermesStateFile,
+    readCodexConfig: () => {
+      try {
+        return readFileSync(config.codexConfig, 'utf8');
+      } catch {
+        return null;
+      }
+    },
+    instructions: COORDINATOR_INSTRUCTIONS,
+  });
   const app = createBridge({
     token: config.token,
-    request: client.request.bind(client),
+    request,
     discover: createDiscovery(),
+    hermes,
   });
   const server = createServer(
     { maxHeaderSize: 8192, requestTimeout: 15000, headersTimeout: 10000 },
@@ -61,6 +93,7 @@ if (process.argv.includes('--pairing')) {
     );
   });
   const shutdown = () => {
+    hermes.close();
     server.close();
     server.closeIdleConnections();
     setTimeout(() => process.exit(0), 2000).unref();
