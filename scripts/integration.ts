@@ -356,6 +356,8 @@ try {
       stateFile: join(hermesHome, 'bridge-state.json'),
       readCodexConfig: () => null,
       instructions: COORDINATOR_INSTRUCTIONS,
+      // A fresh HERMES_HOME makes newer Hermes install its dependencies first.
+      startTimeoutMs: 300000,
       model: {
         model: 'fake-model',
         provider: 'custom',
@@ -364,7 +366,7 @@ try {
       },
     });
     const settle = async (done: (c: Conversation) => boolean) => {
-      for (let attempt = 0; attempt < 600; attempt++) {
+      for (let attempt = 0; attempt < 3000; attempt++) {
         const conversation = coordinator.conversation();
         if (done(conversation)) return conversation;
         await delay(100);

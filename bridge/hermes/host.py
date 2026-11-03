@@ -16,8 +16,19 @@ import sys
 import threading
 import uuid
 
-# Hermes replaces sys.stdout in-process; keep our own copy of the pipe first.
-_OUT = os.fdopen(os.dup(1), "w", buffering=1)
+# Hermes replaces sys.stdout and newer versions also print progress straight to
+# file descriptor 1. Keep a private copy of the pipe for the protocol (inherited
+# if Hermes's bootstrap re-launches this process) and point fd 1 at /dev/null.
+_fd = int(os.environ.get("HERD_HOST_OUT_FD", "-1"))
+if _fd < 0:
+    _fd = os.dup(1)
+    os.set_inheritable(_fd, True)
+    os.environ["HERD_HOST_OUT_FD"] = str(_fd)
+_OUT = os.fdopen(_fd, "w", buffering=1)
+_null = os.open(os.devnull, os.O_WRONLY)
+os.dup2(_null, 1)
+os.close(_null)
+sys.stdout = open(os.devnull, "w")
 _OUT_LOCK = threading.Lock()
 # No user plugins, shell hooks, webhooks or configured MCP servers.
 os.environ["HERMES_SAFE_MODE"] = "1"
@@ -44,6 +55,13 @@ def emit(message):
 
 try:
     sys.path.insert(0, HERMES_DIR)
+    # Every Hermes entry point imports this first: newer Hermes keeps its
+    # dependencies in a separate committed environment that this activates.
+    try:
+        import hermes_bootstrap  # noqa: F401
+    except ModuleNotFoundError as missing:
+        if missing.name != "hermes_bootstrap":
+            raise
     from pathlib import Path
 
     import agent.title_generator as title_generator
@@ -235,7 +253,9 @@ class Host:
         self.ready(None)
 
     def turn(self, message):
-        if self.turn_thread and self.turn_thread.is_alive():
+        # Busy until the previous turn has closed its request and said so; its
+        # thread may still be returning after turn_end, which is harmless.
+        if self.turn_id is not None:
             emit({"type": "turn_end", "turnId": message["turnId"], "text": "",
                   "interrupted": False, "error": "Hermes is still answering."})
             return
@@ -257,8 +277,6 @@ class Host:
             text_out = "" if error else (result.get("final_response") or "").strip()
         except Exception as exc:  # noqa: BLE001
             error = f"{type(exc).__name__}: {exc}"[:500]
-        finally:
-            self.turn_id = None
         if interrupted or error:
             # The model must see the request as closed in later turns, even
             # after a partial reply.
@@ -266,6 +284,8 @@ class Host:
                 self.db.append_message(session_id, "assistant", STOP_NOTE)
             except Exception:  # noqa: BLE001
                 pass
+        # Only now may the next turn start: its history must include the note.
+        self.turn_id = None
         emit({"type": "turn_end", "turnId": turn_id, "text": text_out,
               "interrupted": interrupted, "error": str(error)[:500] if error else None})
 
