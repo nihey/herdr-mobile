@@ -38,6 +38,7 @@
 **Files:** scratch only: `$SCRATCH/hermes-host-spike/` (the session scratchpad). Nothing committed.
 
 **Interfaces:**
+
 - Produces: ledger lines `Task 1: fact: …` naming the exact verified API that Task 3 uses. Task 3's host must use only names recorded here.
 
 Run everything with `~/.hermes/hermes-agent/venv/bin/python -I`, `HERMES_HOME` set to a fresh temp dir, every `HERDR_*` variable unset, against a fake OpenAI-compatible server written in the scratch dir (Node `http`, scripted responses). No real provider calls, no `herdr`, no writes to `~/.hermes`.
@@ -62,23 +63,46 @@ If (b) cannot produce exactly four tools by any combination, stop and ask the us
 ### Task 2: Shared Herdr actions (refactor, no behavior change)
 
 **Files:**
+
 - Create: `bridge/src/actions.ts`
 - Modify: `bridge/src/schema.ts` (resolvers call actions)
 - Test: `bridge/src/server.test.ts` (unchanged; must stay green)
 
 **Interfaces:**
+
 - Produces:
+
   ```ts
-  export type Snapshot = { workspaces?: RecordValue[]; panes?: RecordValue[]; agents?: RecordValue[] } & RecordValue;
-  export function createActions(request: RequestHerdr, timing: StartTiming, homeDir: string): {
-    call(method: string, params?: RecordValue, timeoutMs?: number): Promise<RecordValue>; // GraphQLError on failure, as today
+  export type Snapshot = {
+    workspaces?: RecordValue[];
+    panes?: RecordValue[];
+    agents?: RecordValue[];
+  } & RecordValue;
+  export function createActions(
+    request: RequestHerdr,
+    timing: StartTiming,
+    homeDir: string,
+  ): {
+    call(
+      method: string,
+      params?: RecordValue,
+      timeoutMs?: number,
+    ): Promise<RecordValue>; // GraphQLError on failure, as today
     snapshot(): Promise<Snapshot>;
-    readOutput(target: string, options: { source: 'RECENT' | 'VISIBLE'; lines: number; raw: boolean }): Promise<string>;
+    readOutput(
+      target: string,
+      options: { source: 'RECENT' | 'VISIBLE'; lines: number; raw: boolean },
+    ): Promise<string>;
     prompt(target: string, text: string): Promise<void>;
-    startSession(args: { workspaceId: string | null; name: string; kind: string }): Promise<StartedSession>;
+    startSession(args: {
+      workspaceId: string | null;
+      name: string;
+      kind: string;
+    }): Promise<StartedSession>;
     startTerminal(workspaceId: string | null): Promise<StartedTerminal>;
   };
   ```
+
   `RequestHerdr`, `StartTiming`, `HOME_WORKSPACE_LABEL`, the validators (`target`, `text`, `agentName`, `agentKind`) move to `actions.ts` and are re-exported from `schema.ts` where tests import them.
 
 - [ ] **Step 1: Move the helpers and resolver bodies into `createActions`; resolvers become one-line calls.** Error codes, messages and extensions stay byte-identical.
@@ -90,34 +114,88 @@ If (b) cannot produce exactly four tools by any combination, stop and ask the us
 ### Task 3: Python host and its stdio client
 
 **Files:**
+
 - Create: `bridge/hermes/host.py` (outside `src/` so `new URL('../hermes/host.py', import.meta.url)` resolves from both `src/` and `dist/`)
 - Create: `bridge/src/hermes/protocol.ts`, `bridge/src/hermes/host.ts`
 - Create (test util): `bridge/src/hermes/fake-model.ts` — fake OpenAI-compatible server shaped by Task 1(e)
 - Test: `bridge/src/hermes/host.test.ts`
 
 **Interfaces:**
+
 - Consumes: Task 1 facts.
 - Produces (`protocol.ts`):
   ```ts
-  export type HistoryTool = { name: string; args: Record<string, unknown>; result: string };
-  export type HistoryItem = { role: 'user' | 'hermes'; text: string; tools: HistoryTool[]; stopped: boolean };
+  export type HistoryTool = {
+    name: string;
+    args: Record<string, unknown>;
+    result: string;
+  };
+  export type HistoryItem = {
+    role: 'user' | 'hermes';
+    text: string;
+    tools: HistoryTool[];
+    stopped: boolean;
+  };
   export type HostIn =
-    | { type: 'start'; sessionId: string | null; model: string; provider: string; baseUrl?: string; apiKey?: string; reasoningEffort: 'medium'; instructions: string; probe: boolean }
+    | {
+        type: 'start';
+        sessionId: string | null;
+        model: string;
+        provider: string;
+        baseUrl?: string;
+        apiKey?: string;
+        reasoningEffort: 'medium';
+        instructions: string;
+        probe: boolean;
+      }
     | { type: 'turn'; turnId: string; text: string }
     | { type: 'cancel'; turnId: string }
     | { type: 'tool_result'; callId: string; ok: boolean; result: string }
     | { type: 'new' };
   export type HostOut =
-    | { type: 'ready'; sessionId: string; tools: string[]; history: HistoryItem[]; defaultModel: string | null; defaultProvider: string | null; probe: { ok: boolean; modelMissing: boolean } | null }
+    | {
+        type: 'ready';
+        sessionId: string;
+        tools: string[];
+        history: HistoryItem[];
+        defaultModel: string | null;
+        defaultProvider: string | null;
+        probe: { ok: boolean; modelMissing: boolean } | null;
+      }
     | { type: 'delta'; turnId: string; text: string }
-    | { type: 'tool_call'; turnId: string; callId: string; name: string; args: Record<string, unknown> }
-    | { type: 'turn_end'; turnId: string; text: string; interrupted: boolean; error: string | null }
-    | { type: 'fatal'; reason: 'signed_out' | 'incompatible' | 'other'; message: string };
+    | {
+        type: 'tool_call';
+        turnId: string;
+        callId: string;
+        name: string;
+        args: Record<string, unknown>;
+      }
+    | {
+        type: 'turn_end';
+        turnId: string;
+        text: string;
+        interrupted: boolean;
+        error: string | null;
+      }
+    | {
+        type: 'fatal';
+        reason: 'signed_out' | 'incompatible' | 'other';
+        message: string;
+      };
   ```
   (`host.ts`):
   ```ts
-  export type HermesHost = { send(message: HostIn): void; onMessage(listener: (message: HostOut) => void): void; onExit(listener: (code: number | null) => void): void; stop(): void };
-  export function spawnHost(options: { python: string; script?: string; env?: NodeJS.ProcessEnv }): HermesHost;
+  export type HermesHost = {
+    send(message: HostIn): void;
+    onMessage(listener: (message: HostOut) => void): void;
+    onExit(listener: (code: number | null) => void): void;
+    stop(): void;
+  };
+  export function spawnHost(options: {
+    python: string;
+    script?: string;
+    env?: NodeJS.ProcessEnv;
+  }): HermesHost;
   ```
   `spawnHost` removes every `HERDR_*` key from the env, passes `-I`, drops stderr (never logged), parses stdout as JSON lines with a 4 MiB line cap (over-long or invalid line → `fatal` `other`, process killed).
 - Host behavior: one agent per session; tools registered in toolset `herd_remote` with the schemas from Task 4; a tool handler writes `tool_call` and blocks (max 120 s, then returns `{"error":"timeout"}` to Hermes) until the matching `tool_result`; one turn at a time; `cancel` calls `hard_interrupt()`. After an interrupted turn the host appends and persists the assistant note `Stopped by the user. Nothing more will be done for that request.` so the model sees the request as closed. `probe: true` runs one tool-less completion `Reply with OK.` with the requested model before `ready`; a model-not-found (Task 1(f)) sets `modelMissing: true`. Provider resolution failure for `openai-codex` → `fatal` `signed_out`. Import or attribute errors from Hermes internals → `fatal` `incompatible` with the missing name.
@@ -141,22 +219,42 @@ Tests are skipped (`describe.skipIf`) when `~/.hermes/hermes-agent/venv/bin/pyth
 ### Task 4: The four tools and the send guards
 
 **Files:**
+
 - Create: `bridge/src/hermes/tools.ts`
 - Test: `bridge/src/hermes/tools.test.ts`
 
 **Interfaces:**
+
 - Consumes: `createActions` (Task 2).
 - Produces:
+
   ```ts
-  export const TOOL_NAMES = ['list_agents', 'read_agent', 'send_to_agent', 'start_agent'] as const;
+  export const TOOL_NAMES = [
+    'list_agents',
+    'read_agent',
+    'send_to_agent',
+    'start_agent',
+  ] as const;
   export const TOOL_SCHEMAS: Record<(typeof TOOL_NAMES)[number], object>; // OpenAI function JSON schemas, sent to the host in `start`
   export const CHANGES_PER_TURN = 3;
-  export type Chip = { kind: 'read' | 'sent' | 'started'; paneId: string; title: string | null };
+  export type Chip = {
+    kind: 'read' | 'sent' | 'started';
+    paneId: string;
+    title: string | null;
+  };
   export type Turn = { id: string; changes: number };
-  export function createTools(actions: ReturnType<typeof createActions>, newName: (kind: string) => string): {
-    run(turn: Turn | null, name: string, args: unknown): Promise<{ ok: boolean; result: string; chip?: Chip }>;
+  export function createTools(
+    actions: ReturnType<typeof createActions>,
+    newName: (kind: string) => string,
+  ): {
+    run(
+      turn: Turn | null,
+      name: string,
+      args: unknown,
+    ): Promise<{ ok: boolean; result: string; chip?: Chip }>;
   };
   ```
+
   Tool contracts (results are JSON text for the model):
   - `list_agents()` → `[{ agent_id, title, project, folder, kind, status }]` (agents only; `agent_id` = pane ID).
   - `read_agent({ agent_id, lines? = 120 })` → `{ title, status, text }`, `text` clipped to the last 200 lines and 24 KiB; chip `read`.
@@ -184,12 +282,15 @@ Tests are skipped (`describe.skipIf`) when `~/.hermes/hermes-agent/venv/bin/pyth
 ### Task 5: The coordinator
 
 **Files:**
+
 - Create: `bridge/src/hermes/coordinator.ts`, `bridge/src/hermes/model.ts`
 - Test: `bridge/src/hermes/coordinator.test.ts`, `bridge/src/hermes/model.test.ts`
 
 **Interfaces:**
+
 - Consumes: `HermesHost`/`HostIn`/`HostOut` (Task 3), `createTools`/`Chip`/`TOOL_SCHEMAS` (Task 4).
 - Produces:
+
   ```ts
   // model.ts
   export function codexModel(toml: string): string | null; // top-level `model = "…"` before any [table]
@@ -214,6 +315,7 @@ Tests are skipped (`describe.skipIf`) when `~/.hermes/hermes-agent/venv/bin/pyth
   export class CoordinatorError extends Error { constructor(readonly code: string, message: string) }
   export const COORDINATOR_INSTRUCTIONS: string; // spec "Instructions" + send-guard guidance
   ```
+
   Model choice: Codex model with provider `openai-codex`; `probe: true` unless it equals `verifiedModel`. On `probe.modelMissing` restart with `ready.defaultModel`/`defaultProvider` and set `modelNote` to `<fallback> · codex's <codex model> isn't available in hermes`. No Codex config → Hermes default, no note.
   Status reasons: not installed → `Hermes isn't installed on this computer.`; `fatal signed_out` → `Hermes isn't signed in to OpenAI Codex on this computer. Run hermes login there.`; `incompatible` → `This Hermes version isn't supported yet (<message>).`; tool list ≠ `TOOL_NAMES` → unavailable `Hermes offered tools beyond the four coordinator tools; refusing to start.` and the host is stopped. Host exit → unavailable with a restart on the next `conversation()` after 30 s.
   Turns: `send` while working → `hermes_busy`; each `tool_call` runs through `tools.run(currentTurn, …)` and its chip is appended to the current reply; `delta` grows the reply text; `turn_end` closes it (`interrupted` → `stopped: true`). History from `ready` maps tools back to chips (`read_agent`→read, `send_to_agent`→sent, `start_agent`→started, only when the recorded result was ok); a trailing user message with no reply maps to `stopped: true`.
@@ -240,12 +342,15 @@ Tests are skipped (`describe.skipIf`) when `~/.hermes/hermes-agent/venv/bin/pyth
 ### Task 6: GraphQL API and bridge wiring
 
 **Files:**
+
 - Modify: `bridge/src/schema.ts`, `bridge/src/server.ts`, `bridge/src/index.ts`, `bridge/src/config.ts`
 - Test: `bridge/src/server.test.ts`
 
 **Interfaces:**
+
 - Consumes: `createCoordinator` (Task 5).
 - Produces (SDL added to the schema string):
+
   ```graphql
   enum HermesStatus { STARTING READY UNAVAILABLE }
   enum HermesRole { USER HERMES }
@@ -260,6 +365,7 @@ Tests are skipped (`describe.skipIf`) when `~/.hermes/hermes-agent/venv/bin/pyth
   hermesStop: ActionResult!
   hermesNew: ActionResult!
   ```
+
   Resolvers map the coordinator's lowercase values to the enums (`'read'`→`READ`, `'user'`→`USER`, `'starting'`→`STARTING`, …). `createBridge({ …, hermes?: Coordinator })`; without one, `hermes` is `UNAVAILABLE` with reason `Hermes is not set up on this bridge.` `hermesSend` text limit 16 KiB; `CoordinatorError` → `GraphQLError` with its code. `messages(last)` 1–200. `config.ts` adds `hermesPython` (`HERDR_MOBILE_HERMES_PYTHON`, default `~/.hermes/hermes-agent/venv/bin/python`; missing file → spawn returns null) and `hermesStateFile` (`../.local/hermes-state.json`). `index.ts` builds actions, tools and coordinator; name generator `${kind}-${4 hex}`; `close()` on shutdown.
 
 - [ ] **Step 1: Write the failing tests** in `server.test.ts` (fake coordinator object):
@@ -279,9 +385,11 @@ Tests are skipped (`describe.skipIf`) when `~/.hermes/hermes-agent/venv/bin/pyth
 ### Task 7: Integration against a disposable Herdr session
 
 **Files:**
+
 - Modify: `scripts/integration.ts`
 
 **Interfaces:**
+
 - Consumes: Tasks 3–6; the script's existing disposable session, `/bin/sh` panes and `codex` stand-in; `fake-model.ts`.
 
 The fake model scripts Hermes's turns: (1) `list_agents` → reply; (2) `send_to_agent` to the stand-in with `HERMES_SEND_OK` → reply; (3) four `send_to_agent` calls in one turn; (4) `start_agent` with no project and `first_task` `HERMES_START_OK`. The coordinator runs the real host (skip this section with a printed notice when Hermes's Python is missing) with `HERMES_HOME` = temp dir and the fake provider.
@@ -295,25 +403,31 @@ The fake model scripts Hermes's turns: (1) `list_agents` → reply; (2) `send_to
 ### Task 8: App operations and helpers
 
 **Files:**
+
 - Modify: `mobile/src/lib/graphql.ts`, `mobile/src/lib/types.ts`, `mobile/src/lib/bridge-compat.test.ts`
 - Create: `mobile/src/lib/hermes.ts`, `mobile/src/lib/hermes.test.ts`
 
 **Interfaces:**
+
 - Produces:
+
   ```ts
   // graphql.ts
-  export const HERMES;          // query Hermes { hermes { status reason model modelNote working messages(last: 100) { id role text stopped at chips { kind paneId title } } } }
-  export const HERMES_SUMMARY;  // query HermesSummary { hermes { status reason working messages(last: 1) { id role text } } }
-  export const HERMES_SEND;     // mutation HermesSend($text: String!) { hermesSend(text: $text) { ok } }
-  export const HERMES_STOP;     // mutation HermesStop { hermesStop { ok } }
-  export const HERMES_NEW;      // mutation HermesNew { hermesNew { ok } }
+  export const HERMES; // query Hermes { hermes { status reason model modelNote working messages(last: 100) { id role text stopped at chips { kind paneId title } } } }
+  export const HERMES_SUMMARY; // query HermesSummary { hermes { status reason working messages(last: 1) { id role text } } }
+  export const HERMES_SEND; // mutation HermesSend($text: String!) { hermesSend(text: $text) { ok } }
+  export const HERMES_STOP; // mutation HermesStop { hermesStop { ok } }
+  export const HERMES_NEW; // mutation HermesNew { hermesNew { ok } }
   // types.ts: HermesChip, HermesMessage, Hermes (mirroring the SDL)
   // hermes.ts
   export function chipLabel(chip: HermesChip, agent: Agent | undefined): string; // "read ✓ title" / "sent to ◐ title" / "started ○ title"; gone agent → "<verb> (closed) title"
-  export function summaryLine(hermes: Pick<Hermes, 'status' | 'reason' | 'working' | 'messages'>): string; // working → "working…", unavailable → reason, else newest message's first line (≤ 80 chars), empty → "ask about your agents"
+  export function summaryLine(
+    hermes: Pick<Hermes, 'status' | 'reason' | 'working' | 'messages'>,
+  ): string; // working → "working…", unavailable → reason, else newest message's first line (≤ 80 chars), empty → "ask about your agents"
   export function reportUrl(text: string, address: string): string; // mailto:, subject "Herd Remote: report a Hermes reply", body = reply clipped to 2000 chars, URI-encoded
   export const REPORT_ADDRESS: string;
   ```
+
   Compat test: replace `needs050` with `needsNewer = ['HOME_FOLDER','START_TERMINAL','START_HOME_SESSION','HERMES','HERMES_SUMMARY','HERMES_SEND','HERMES_STOP','HERMES_NEW']`.
 
 - [ ] **Step 1: Write the failing tests** in `hermes.test.ts`: `labels a send with the agent's status mark` → `chipLabel({kind:'SENT',paneId:'p',title:'Payments migration'}, {status:'working',…})` === `'sent to ◐ Payments migration'`; `labels a closed agent` → undefined agent → `'read (closed) Payments migration'`; `summarizes a working Hermes` → `'working…'`; `summarizes with the newest line` → first line only, clipped to 80 chars with `…`; `builds a report email` → starts with `mailto:`, decodes back to the clipped body, never longer than 2000 chars of reply.
@@ -327,12 +441,15 @@ The fake model scripts Hermes's turns: (1) `list_agents` → reply; (2) `send_to
 ### Task 9: Hermes chat screen
 
 **Files:**
+
 - Create: `mobile/src/screens/HermesScreen.tsx`, `mobile/src/app/hermes.tsx`
 
 **Interfaces:**
+
 - Consumes: Task 8 operations/helpers; `usePoll`, `useSnapshot`, `useDictation`/`DictationControl`, `errorMessage`, ui tokens.
 
 Behavior (spec "The screens" + "The conversation"):
+
 - Route `hermes.tsx` takes `machineId`; mismatch with the active profile → `<Redirect href="/" />` (same as the agent route). Keyed by machine.
 - Header `✦ hermes`, subtitle `coordinates your agents · <machine>` (plus `modelNote` when set), **new** button (confirm Sheet → `HERMES_NEW`). The call button is not added in stage 1.
 - Messages: user bubbles right (`c.elevated`), Hermes bubbles left (`c.panel` + `c.line` border), radius 8 with the 2 px tail corner; a stopped reply shows `stopped` in `c.dim`. Chips between bubbles via `chipLabel`; tapping a live agent's chip opens `/agent/[paneId]` with `machineId`; closed chips are not pressable. Long-press a Hermes bubble → Sheet with **report this reply** → `Linking.openURL(reportUrl(text, REPORT_ADDRESS))`.
@@ -349,6 +466,7 @@ Behavior (spec "The screens" + "The conversation"):
 ### Task 10: Pinned Hermes row on home
 
 **Files:**
+
 - Create: `mobile/src/screens/HermesRow.tsx`
 - Modify: `mobile/src/screens/AgentsScreen.tsx`
 
@@ -363,6 +481,7 @@ Behavior: first row above the counters, `✦ hermes` in `c.accent`, `summaryLine
 ### Task 11: Release 0.6.0, docs, privacy and checks
 
 **Files:**
+
 - Modify: `package.json`, `bridge/package.json`, `mobile/package.json`, `mobile/app.json` (0.6.0, versionCode 7), `README.md`, `AGENTS.md`, `bridge/AGENTS.md`, `mobile/AGENTS.md`, `PRIVACY.md`, `docs/verification.md`, `docs/implementation-ledger.md`
 
 - [ ] **Step 1: Docs.** AGENTS files: the host architecture, guards, tool list check, state file, env stripping, GraphQL ops, compat list. README: Hermes setup (installed Hermes, Codex sign-in, `HERDR_MOBILE_HERMES_PYTHON`), what Hermes can do. PRIVACY.md: when Hermes is used, the user's messages and what Hermes reads from agents go to the Hermes model provider configured on the computer (OpenAI through the user's Codex sign-in by default); nothing is sent unless the user uses Hermes; audio unaffected; new effective date.
