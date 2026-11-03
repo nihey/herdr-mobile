@@ -126,6 +126,10 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
   // Output shown while the reader is scrolled up; null follows the live output.
   const [frozen, setFrozen] = useState<string | null>(null);
   const scroll = useRef<ScrollView>(null);
+  // Whether the terminal is wider than the phone (so it pans sideways).
+  const [viewWidth, setViewWidth] = useState(0);
+  const [contentWidth, setContentWidth] = useState(0);
+  const wide = viewWidth > 0 && contentWidth > viewWidth + 2;
   const followRef = useRef(true);
   const sending = useRef(false);
 
@@ -363,6 +367,11 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
               ))}
             </View>
             <View style={[s.row, { gap: 8 }]}>
+              {wide && (
+                <Text style={[s.eyebrow, { fontSize: 10, lineHeight: 13 }]}>
+                  ← swipe →
+                </Text>
+              )}
               <Text
                 numberOfLines={1}
                 style={[s.eyebrow, { fontSize: 10, lineHeight: 13 }]}
@@ -378,12 +387,11 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
             </View>
           </View>
           {output.loading && !output.data ? (
-            <Loading label="Reading the terminal…" />
+            <Loading label="reading the terminal…" />
           ) : (
             <ScrollView
               ref={scroll}
               contentContainerStyle={{
-                padding: 14,
                 paddingTop: 2,
                 // Room for the jump pill so it never covers the last lines.
                 paddingBottom: following ? 24 : 64,
@@ -408,17 +416,30 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                 setFrozen(atBottom ? null : shown);
               }}
             >
-              <Text
-                selectable
-                style={{
-                  color: c.term,
-                  fontFamily: mono,
-                  fontSize: 12,
-                  lineHeight: 19,
-                }}
+              {/* Rows keep the computer's layout: never re-wrapped; the whole
+                  screen pans sideways together. */}
+              <ScrollView
+                horizontal
+                nestedScrollEnabled
+                showsHorizontalScrollIndicator={wide}
+                contentContainerStyle={{ paddingHorizontal: 14 }}
+                onLayout={(event) =>
+                  setViewWidth(event.nativeEvent.layout.width)
+                }
+                onContentSizeChange={(width) => setContentWidth(width)}
               >
-                {shown || 'No output yet.'}
-              </Text>
+                <Text
+                  selectable
+                  style={{
+                    color: c.term,
+                    fontFamily: mono,
+                    fontSize: 12,
+                    lineHeight: 19,
+                  }}
+                >
+                  {shown || 'no output yet.'}
+                </Text>
+              </ScrollView>
               {lineCount > 0 && (
                 <Text
                   style={{
@@ -426,6 +447,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                     fontFamily: mono,
                     fontSize: 10,
                     marginTop: 12,
+                    paddingHorizontal: 14,
                   }}
                 >
                   — {lineCount} line{lineCount === 1 ? '' : 's'} —

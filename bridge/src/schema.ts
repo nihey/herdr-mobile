@@ -419,7 +419,9 @@ export function buildSchema(
           target(args.target);
           if (args.lines < 1 || args.lines > 1000)
             badInput('Choose between 1 and 1000 lines.');
-          const read = (source: 'visible' | 'recent_unwrapped') =>
+          // Rows as the computer shows them (wrapped at the pane's width); the
+          // app never re-wraps them, so a phone sees the same layout.
+          const read = (source: 'visible' | 'recent') =>
             call(args.raw ? 'pane.read' : 'agent.read', {
               [args.raw ? 'pane_id' : 'target']: args.target,
               source,
@@ -432,10 +434,10 @@ export function buildSchema(
           // app with mouse-wheel events, which moves it on the user's desktop
           // when idle and is refused while working. Everything they have is on
           // screen, so read the screen instead.
-          let source: 'visible' | 'recent_unwrapped' =
+          let source: 'visible' | 'recent' =
             args.source === 'VISIBLE' || (await noScrollback(args.target))
               ? 'visible'
-              : 'recent_unwrapped';
+              : 'recent';
           let result: RecordValue;
           try {
             result = await read(source);

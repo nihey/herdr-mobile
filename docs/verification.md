@@ -1,5 +1,11 @@
 # Verification — October 15, 2026
 
+## Version 0.5.1: full-screen apps and unwrapped terminal text — November 3, 2026
+
+- Reproduced in a disposable Herdr 0.9.4 session with a stand-in that runs on the alternate screen with mouse reporting and Claude's working title: a 300-line `recent` read fails with `agent_not_idle` while working (the user's report), and while idle Herdr harvests history by sending mouse-wheel events to the app (logged by the stand-in), which would scroll a real agent on the desktop at every poll. Full-screen panes report `max_offset_from_bottom: 0` even after earlier shell output.
+- After the fix, the same session: the working full-screen stand-in returns its screen, idle reads send it no input, and a shell with 200 lines of history still returns all of them. Lint, TypeScript and 132 tests pass.
+- Release APK 0.5.1 (code 6) on the read-only emulator at 1080×2400, 420 dpi: rows from a 120-column pane stay on one line with a `← swipe →` hint, and a swipe pans the whole screen to the ends of the widest rows. The full-screen stand-in shows its screen while working, with no error and no wheel events sent while viewing it.
+
 ## Version 0.5.0: plain terminals and the Herdr look — November 3, 2026
 
 - Lint, TypeScript and 129 tests pass (bridge: startTerminal in a project, home workspace created then reused by label whatever its panes' folders, home agent sessions, not-ready shells, unknown projects; app: status marks, composer modes and Run failure notice, project list and old-bridge detection, and a palette guard that rejects color literals outside the theme).

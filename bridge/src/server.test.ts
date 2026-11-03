@@ -439,8 +439,8 @@ describe('authenticated GraphQL bridge', () => {
   it('reads recent history when the pane has scrollback', async () => {
     const { query, reads } = outputSetup({ maxOffset: 162 });
     const body = await query(false);
-    expect(body.data?.output.text).toBe('recent_unwrapped text');
-    expect(reads()).toEqual(['recent_unwrapped']);
+    expect(body.data?.output.text).toBe('recent text');
+    expect(reads()).toEqual(['recent']);
   });
   it('shows the screen when Herdr refuses a working full-screen read', async () => {
     const { query, reads } = outputSetup({
@@ -450,7 +450,7 @@ describe('authenticated GraphQL bridge', () => {
     const body = await query(false);
     expect(body.errors).toBeUndefined();
     expect(body.data?.output.text).toBe('visible text');
-    expect(reads()).toEqual(['recent_unwrapped', 'visible']);
+    expect(reads()).toEqual(['recent', 'visible']);
   });
   it('maps output reads using the installed schema source enum', async () => {
     const { query, calls } = setup();
@@ -462,7 +462,7 @@ describe('authenticated GraphQL bridge', () => {
       method: 'agent.read',
       params: {
         target: 'w1:p1',
-        source: 'recent_unwrapped',
+        source: 'recent',
         lines: 120,
         format: 'text',
         strip_ansi: true,
