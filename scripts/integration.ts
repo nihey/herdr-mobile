@@ -1,12 +1,27 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { HerdrClient } from '../bridge/src/socket.js';
 import { createBridge } from '../bridge/src/server.js';
+import { createActions, defaultStartTiming } from '../bridge/src/actions.js';
+import {
+  COORDINATOR_INSTRUCTIONS,
+  createCoordinator,
+  type Conversation,
+} from '../bridge/src/hermes/coordinator.js';
+import { startFakeModel } from '../bridge/src/hermes/fake-model.js';
+import { spawnHost } from '../bridge/src/hermes/host.js';
+import { createTools } from '../bridge/src/hermes/tools.js';
 
 // Always create a private named session. Never target the user's default socket.
 const name = `herdr-mobile-test-${process.pid}`;
@@ -298,8 +313,146 @@ try {
     ),
     'The new terminal did not run the command.',
   );
+  // Hermes coordinator: the real host with a scripted fake model (no model
+  // calls), acting only on this disposable session through the bridge tools.
+  const hermesPython = join(homedir(), '.hermes/hermes-agent/venv/bin/python');
+  let hermesSummary = ' Hermes skipped (Hermes is not installed).';
+  if (existsSync(hermesPython)) {
+    const hermesHome = mkdtempSync(join(tmpdir(), 'herdr-mobile-hermes-'));
+    const send = (message: string) => ({
+      tool: 'send_to_agent',
+      args: { agent_id: sessionPane, message },
+    });
+    const model = await startFakeModel([
+      { tool: 'list_agents' },
+      { text: 'One agent is idle.' },
+      send('HERMES_SEND_OK'),
+      { text: 'Sent.' },
+      send('HERMES_CAP_1'),
+      send('HERMES_CAP_2'),
+      send('HERMES_CAP_3'),
+      send('HERMES_CAP_4'),
+      { text: 'Sent three.' },
+      {
+        tool: 'start_agent',
+        args: { kind: 'codex', first_task: 'HERMES_START_OK' },
+      },
+      { text: 'Started.' },
+    ]);
+    const coordinator = createCoordinator({
+      spawn: () =>
+        spawnHost({
+          python: hermesPython,
+          env: { ...process.env, HERMES_HOME: hermesHome },
+        }),
+      tools: createTools(
+        createActions(
+          client.request.bind(client),
+          defaultStartTiming,
+          fakeHome,
+        ),
+        (kind) => `${kind}-hermes`,
+      ),
+      stateFile: join(hermesHome, 'bridge-state.json'),
+      readCodexConfig: () => null,
+      instructions: COORDINATOR_INSTRUCTIONS,
+      model: {
+        model: 'fake-model',
+        provider: 'custom',
+        baseUrl: model.baseUrl,
+        apiKey: 'dummy',
+      },
+    });
+    const settle = async (done: (c: Conversation) => boolean) => {
+      for (let attempt = 0; attempt < 600; attempt++) {
+        const conversation = coordinator.conversation();
+        if (done(conversation)) return conversation;
+        await delay(100);
+      }
+      throw new Error('Hermes did not settle in time.');
+    };
+    const ask = async (text: string) => {
+      coordinator.send(text);
+      return (await settle((c) => !c.working)).messages.at(-1);
+    };
+    const lines = (text: string, value: string) =>
+      text.split('\n').filter((line) => line.trim() === `received: ${value}`)
+        .length;
+    try {
+      assert.equal(
+        (await settle((c) => c.status !== 'starting')).status,
+        'ready',
+      );
+      await ask('what is running?');
+      assert(
+        JSON.stringify(model.requests.at(-1)).includes(sessionPane),
+        'Hermes did not get the agent list.',
+      );
+      const sent = await ask('tell it HERMES_SEND_OK');
+      assert.deepEqual(
+        sent?.chips.map((c) => [c.kind, c.paneId]),
+        [['sent', sessionPane]],
+      );
+      assert(
+        await waitFor(
+          sessionPane,
+          (text) => lines(text, 'HERMES_SEND_OK') === 1,
+        ),
+      );
+      await ask('tell it four things');
+      assert(
+        await waitFor(sessionPane, (text) => lines(text, 'HERMES_CAP_3') === 1),
+      );
+      const capped = await readPane(sessionPane);
+      assert.equal(
+        lines(capped, 'HERMES_CAP_4'),
+        0,
+        'The fourth send got through.',
+      );
+      assert(
+        JSON.stringify(model.requests.at(-1)).includes(
+          'at most 3 agents per request',
+        ),
+        'Hermes was not told about the limit.',
+      );
+      const started = await ask('start a codex at home');
+      const chip = started?.chips.find((c) => c.kind === 'started');
+      assert(chip, 'No started chip.');
+      assert(
+        await waitFor(
+          chip.paneId,
+          (text) => lines(text, 'HERMES_START_OK') === 1,
+        ),
+      );
+      const kinds = await execute<{
+        session: {
+          agents: { kind: string | null }[];
+          workspaces: { id: string; label: string }[];
+          panes: { id: string; workspaceId: string }[];
+        };
+      }>(
+        '{ session { agents { kind } workspaces { id label } panes { id workspaceId } } }',
+      );
+      assert(
+        !kinds.session.agents.some((a) => a.kind === 'hermes'),
+        'Hermes showed up as an agent.',
+      );
+      const home = kinds.session.workspaces.find((w) => w.label === 'phone');
+      assert.equal(
+        kinds.session.panes.find((p) => p.id === chip.paneId)?.workspaceId,
+        home?.id,
+        'Hermes did not start the agent in the home workspace.',
+      );
+      hermesSummary =
+        ' Hermes: list → send once → 3-agent limit → start at home with its first task.';
+    } finally {
+      coordinator.close();
+      await model.close();
+      rmSync(hermesHome, { recursive: true, force: true });
+    }
+  }
   console.log(
-    `Live integration passed against Herdr ${session.session.version}: authenticated snapshot → literal terminal text → Enter → captured output; new session tab → agent start → first task; terminal tab → command; home workspace → reused.`,
+    `Live integration passed against Herdr ${session.session.version}: authenticated snapshot → literal terminal text → Enter → captured output; new session tab → agent start → first task; terminal tab → command; home workspace → reused.${hermesSummary}`,
   );
 } finally {
   if (client) await client.request('server.stop').catch(() => {});

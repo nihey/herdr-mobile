@@ -172,3 +172,66 @@ export const START_HOME_SESSION = gql`
     }
   }
 `;
+// Hermes (bridge 0.6.0+). An older bridge rejects these; the app shows an
+// update notice in the Hermes row instead.
+export const HERMES = gql`
+  query Hermes {
+    hermes {
+      status
+      reason
+      model
+      modelNote
+      working
+      messages(last: 100) {
+        id
+        role
+        text
+        stopped
+        at
+        chips {
+          kind
+          paneId
+          title
+          uncertain
+        }
+      }
+    }
+  }
+`;
+// The home row never starts Hermes: only opening the chat does.
+export const HERMES_SUMMARY = gql`
+  query HermesSummary {
+    hermes(start: false) {
+      status
+      reason
+      modelNote
+      working
+      messages(last: 1) {
+        id
+        role
+        text
+      }
+    }
+  }
+`;
+export const HERMES_SEND = gql`
+  mutation HermesSend($text: String!) {
+    hermesSend(text: $text) {
+      ok
+    }
+  }
+`;
+export const HERMES_STOP = gql`
+  mutation HermesStop {
+    hermesStop {
+      ok
+    }
+  }
+`;
+export const HERMES_NEW = gql`
+  mutation HermesNew {
+    hermesNew {
+      ok
+    }
+  }
+`;

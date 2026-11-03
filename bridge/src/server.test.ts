@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBridge } from './server.js';
 import { HerdrError } from './socket.js';
+import { CoordinatorError, type Coordinator } from './hermes/coordinator.js';
 
 const token = 'a'.repeat(48);
 function setup() {
@@ -817,5 +818,215 @@ describe('authenticated GraphQL bridge', () => {
     );
     expect(response.status).toBe(400);
     expect(calls).toHaveLength(0);
+  });
+});
+
+function hermesSetup(coordinator?: Coordinator) {
+  const app = createBridge({
+    token,
+    request: async () => ({ type: 'ok' }),
+    ...(coordinator ? { hermes: coordinator } : {}),
+  });
+  return async (
+    query: string,
+    variables: Record<string, unknown> = {},
+    authorized = true,
+  ) => {
+    const response = await app(
+      new Request('http://localhost/graphql', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(authorized ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ query, variables }),
+      }),
+    );
+    return { status: response.status, body: await response.json() };
+  };
+}
+function fakeCoordinator(overrides: Partial<Coordinator> = {}) {
+  const sent: string[] = [];
+  const coordinator: Coordinator = {
+    conversation: () => ({
+      status: 'ready',
+      reason: null,
+      model: 'gpt-6.1-sol',
+      modelNote: null,
+      working: false,
+      messages: [
+        {
+          id: 'm1',
+          role: 'user',
+          text: 'how is api?',
+          chips: [],
+          stopped: false,
+          at: '2026-11-03T12:00:00.000Z',
+        },
+        {
+          id: 'm2',
+          role: 'hermes',
+          text: 'Sent it.',
+          chips: [
+            { kind: 'sent', paneId: 'w1:p1', title: 'Payments migration' },
+          ],
+          stopped: false,
+          at: '2026-11-03T12:00:01.000Z',
+        },
+      ],
+    }),
+    send: (text: string) => {
+      sent.push(text);
+      return 't1';
+    },
+    stop: () => undefined,
+    reset: async () => undefined,
+    close: () => undefined,
+    ...overrides,
+  };
+  return { coordinator, sent };
+}
+
+describe('Hermes over GraphQL', () => {
+  it('reports Hermes as unavailable when not set up', async () => {
+    const query = hermesSetup();
+    const { body } = await query('{ hermes { status reason working } }');
+    expect(body.data.hermes).toEqual({
+      status: 'UNAVAILABLE',
+      reason: 'Hermes is not set up on this bridge.',
+      working: false,
+    });
+  });
+
+  it('sends a message to Hermes', async () => {
+    const { coordinator, sent } = fakeCoordinator();
+    const query = hermesSetup(coordinator);
+    const { body } = await query(
+      'mutation($text: String!) { hermesSend(text: $text) { ok } }',
+      { text: 'hi' },
+    );
+    expect(body.data.hermesSend.ok).toBe(true);
+    expect(sent).toEqual(['hi']);
+  });
+
+  it('reports a busy Hermes', async () => {
+    const { coordinator } = fakeCoordinator({
+      send: () => {
+        throw new CoordinatorError('hermes_busy', 'Hermes is still answering.');
+      },
+    });
+    const query = hermesSetup(coordinator);
+    const { body } = await query('mutation { hermesSend(text: "hi") { ok } }');
+    expect(body.errors[0].extensions.code).toBe('hermes_busy');
+    expect(body.errors[0].message).toBe('Hermes is still answering.');
+  });
+
+  it('rejects oversized Hermes messages', async () => {
+    const { coordinator, sent } = fakeCoordinator();
+    const query = hermesSetup(coordinator);
+    const { body } = await query(
+      'mutation($text: String!) { hermesSend(text: $text) { ok } }',
+      { text: 'x'.repeat(17 * 1024) },
+    );
+    expect(body.errors[0].extensions.code).toBe('BAD_USER_INPUT');
+    expect(sent).toEqual([]);
+  });
+
+  it('returns the last messages with chips', async () => {
+    const { coordinator } = fakeCoordinator();
+    const query = hermesSetup(coordinator);
+    const { body } = await query(
+      '{ hermes { status model messages(last: 1) { id role text stopped chips { kind paneId title } } } }',
+    );
+    expect(body.data.hermes).toEqual({
+      status: 'READY',
+      model: 'gpt-6.1-sol',
+      messages: [
+        {
+          id: 'm2',
+          role: 'HERMES',
+          text: 'Sent it.',
+          stopped: false,
+          chips: [
+            { kind: 'SENT', paneId: 'w1:p1', title: 'Payments migration' },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('stops and starts a new Hermes conversation', async () => {
+    let stopped = 0;
+    let resets = 0;
+    const { coordinator } = fakeCoordinator({
+      stop: () => void stopped++,
+      reset: async () => void resets++,
+    });
+    const query = hermesSetup(coordinator);
+    expect(
+      (await query('mutation { hermesStop { ok } }')).body.data.hermesStop.ok,
+    ).toBe(true);
+    expect(
+      (await query('mutation { hermesNew { ok } }')).body.data.hermesNew.ok,
+    ).toBe(true);
+    expect([stopped, resets]).toEqual([1, 1]);
+  });
+
+  it('requires the token for Hermes', async () => {
+    const { coordinator } = fakeCoordinator();
+    const query = hermesSetup(coordinator);
+    const { status } = await query('{ hermes { status } }', {}, false);
+    expect(status).toBe(401);
+  });
+
+  it('does not start Hermes for the home summary', async () => {
+    const seen: unknown[] = [];
+    const { coordinator } = fakeCoordinator();
+    const conversation = coordinator.conversation;
+    const query = hermesSetup({
+      ...coordinator,
+      conversation: (options) => {
+        seen.push(options);
+        return { ...conversation(), status: 'off', messages: [] };
+      },
+    });
+    const { body } = await query('{ hermes(start: false) { status } }');
+    expect(body.data.hermes.status).toBe('OFF');
+    expect(seen).toEqual([{ start: false }]);
+  });
+
+  it('marks chips whose change is uncertain', async () => {
+    const { coordinator } = fakeCoordinator();
+    const conversation = coordinator.conversation;
+    const query = hermesSetup({
+      ...coordinator,
+      conversation: () => {
+        const value = conversation();
+        const reply = value.messages[1] as (typeof value.messages)[number];
+        return {
+          ...value,
+          messages: [
+            {
+              ...reply,
+              chips: [
+                { kind: 'sent', paneId: 'w1:p1', title: null, uncertain: true },
+              ],
+            },
+          ],
+        };
+      },
+    });
+    const { body } = await query(
+      '{ hermes { messages { chips { kind uncertain } } } }',
+    );
+    expect(body.data.hermes.messages[0].chips).toEqual([
+      { kind: 'SENT', uncertain: true },
+    ]);
+    const plain = await hermesSetup(coordinator)(
+      '{ hermes { messages(last: 1) { chips { uncertain } } } }',
+    );
+    expect(plain.body.data.hermes.messages[0].chips).toEqual([
+      { uncertain: false },
+    ]);
   });
 });

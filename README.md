@@ -1,6 +1,6 @@
 # Herdr Mobile
 
-An Expo Android companion for [Herdr](https://github.com/herdrdev/herdr). Check agent status, read terminal output, send prompts, respond to approval screens with terminal keys, and start new agent sessions in projects open in Herdr. Discover Tailscale devices and save multiple independently paired machines.
+An Expo Android companion for [Herdr](https://github.com/herdrdev/herdr). Check agent status, read terminal output, send prompts, respond to approval screens with terminal keys, and start new agent sessions in projects open in Herdr. Ask a Hermes agent about all of them in one conversation, and have it message or start agents for you. Discover Tailscale devices and save multiple independently paired machines.
 
 The Android app is named **Herd Remote** (package `io.github.nihey.herdremote`). It is an unofficial companion and is not affiliated with the Herdr project.
 
@@ -19,6 +19,7 @@ Android app → Tailscale → GraphQL bridge :8787 → Herdr Unix socket
 - Node.js 22.13+ and npm.
 - A running Herdr server (developed against 0.9.4, public JSON API/protocol 22).
 - Tailscale on your computer and phone, joined to the same tailnet. Your tailnet ACL must allow the phone to reach the computer on TCP 8787.
+- Optional, for the Hermes chat: [Hermes Agent](https://github.com/NousResearch/hermes-agent) installed on the computer (developed against 0.21.0, default location `~/.hermes/hermes-agent`), signed in to a model provider (by default OpenAI through `hermes login` with Codex).
 - Android 7+; local builds need a full JDK 17+ (including `javac`) and the Android SDK. The build script discovers the installed Android Studio JDK when the system Java has no compiler. Set `JAVA_HOME` to override it.
 
 ## Start the bridge
@@ -120,6 +121,7 @@ Native projects are generated from `mobile/app.json`. Do not edit generated Andr
 - **Recent / Screen:** choose recent output or the current terminal screen. Lines are shown exactly as on your computer, never re-wrapped: swipe sideways to read wide terminals (a `← swipe →` hint shows when the screen is wider than the phone). Full-screen apps such as Claude's interface have no scrollback, so they always show their screen; the bridge never scrolls them to collect history. Select/copy terminal text. Scrolling up freezes the text where you are reading (**PAUSED**) while the agent keeps working; the pill counts new lines. Tap it or scroll to the bottom to resume following.
 - **Prompt** (agents): sends the text plus Enter. **Run** (plain terminals): types the command and presses Enter. **Type:** writes literal terminal text without Enter, for interactive responses, Tab completion or half-written commands. If Run's Enter does not arrive, the command stays typed and is not resent. Use the key toolbar to finish a reply or navigate a question. The app does not automatically answer approvals.
 - **Dictation:** tap the mic beside the composer and speak; words appear in the draft as you talk. Tap ■ to stop, review, then send. Nothing is sent automatically. The **EN/PT** chip picks English or Brazilian Portuguese before you speak and is remembered. Recognition runs only on the phone through Android's on-device speech engine (Android 13+); the first use of each language offers Android's one-time offline model download. Audio and transcripts never go to the bridge or any cloud service.
+- **Hermes:** the first row on the home screen is a conversation with a Hermes agent running on that computer. Ask "how is the payments migration going?" or "what's everyone doing?"; tell it "tell the invoices agent to also check the staging logs" or "start a claude in shop-web to compare pricing pages". It reads your agents' recent output, sends messages as normal prompts and starts agents in new tabs, then names the agents it read, messaged or started (tap one to open it). It does not edit files or run commands itself, and never answers approval prompts. The bridge allows at most 3 agents messaged or started per message, and a request you stop never runs later. Hermes uses Codex's default model (from `~/.codex/config.toml`) and says so on screen if it has to fall back to Hermes's own default. Long-press a reply to report it. Set `HERDR_MOBILE_HERMES_PYTHON` if Hermes is installed elsewhere. Requires the 0.6.0 bridge.
 - **Ctrl+C** sends an interrupt to the selected terminal. It can stop the foreground task.
 - **Terminals:** inspect a shell or unrecognized process. **Start an agent here** launches an installed agent CLI in that explicit pane; Herdr verifies availability. Enter a unique lowercase agent name and a Herdr agent kind.
 - Foreground state/output refresh approximately every 3/1.5 seconds, with bounded backoff on failures. Background polling pauses. No push/background notifications in this version.
@@ -143,7 +145,7 @@ npm run export:android -w mobile
 
 Tests exercise socket framing, daemon errors, correlation, disconnect/timeout handling, size limits, authentication before daemon access, GraphQL mapping/validation, and URL normalization. Mutation tests use a fake socket or an isolated test session, never existing user agents.
 
-`npm run integration` requires the installed `herdr` executable. It creates a unique disposable named server, exercises GraphQL snapshot/input/keys/output, a new session (tab → agent start → first task), a plain terminal tab running a `printf` marker and two home terminals sharing one `phone` workspace (in a temporary home folder) end to end, and stops only that test server. The "agent" is a stand-in `codex` script on a plain `/bin/sh` PATH; the test refuses to start or prompt anything unless the stand-in is what runs, so no real agent CLI or AI provider is used.
+`npm run integration` requires the installed `herdr` executable. It creates a unique disposable named server, exercises GraphQL snapshot/input/keys/output, a new session (tab → agent start → first task), a plain terminal tab running a `printf` marker and two home terminals sharing one `phone` workspace (in a temporary home folder) end to end, and stops only that test server. With Hermes installed it also runs the real Hermes host against a scripted fake model (no model calls): list, one send, the 3-agent limit and a start in the home workspace, only in that disposable session. The "agent" is a stand-in `codex` script on a plain `/bin/sh` PATH; the test refuses to start or prompt anything unless the stand-in is what runs, so no real agent CLI or AI provider is used.
 
 ## Troubleshooting
 

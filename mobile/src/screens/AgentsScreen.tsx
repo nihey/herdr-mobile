@@ -40,6 +40,7 @@ import {
 } from '@/components/ui';
 import { StartAgentModal } from './StartAgentModal';
 import { NewSessionSheet } from './NewSessionSheet';
+import { HermesRow } from './HermesRow';
 
 type StatusFilter = 'working' | 'blocked' | null;
 
@@ -145,6 +146,7 @@ export function AgentsScreen() {
             <Settings2 size={18} color={c.muted} />
           </IconButton>
         </View>
+        <HermesRow />
         {!!data && (
           <View style={[s.row, { gap: 8 }]}>
             {(

@@ -11,5 +11,9 @@
     "noUncheckedIndexedAccess": true
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/test-utils.ts"]
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/test-utils.ts",
+    "src/hermes/fake-model.ts"
+  ]
 }
