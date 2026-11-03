@@ -5,22 +5,41 @@ import {
   Check,
   ChevronRight,
   FolderOpen,
+  House,
   Pencil,
   TerminalSquare,
 } from 'lucide-react-native';
 import { useSession } from '@/lib/session-context';
 import { useDictation } from '@/hooks/useDictation';
-import { NEW_SESSION_OPTIONS, PROMPT, START_SESSION } from '@/lib/graphql';
+import {
+  HOME_FOLDER,
+  KEYS,
+  NEW_SESSION_OPTIONS,
+  PROMPT,
+  SEND_TEXT,
+  START_SESSION,
+  START_TERMINAL,
+} from '@/lib/graphql';
 import { errorMessage } from '@/lib/errors';
 import { handOff } from '@/lib/handoff';
 import { languageInfo } from '@/lib/dictation';
 import {
+  HOME,
+  isOutdated,
   kindChoices,
+  listedProjects,
   shortPath,
   suggestName,
+  terminalsSupported,
   validAgentName,
 } from '@/lib/sessions';
-import type { Agent, Project, StartedSession } from '@/lib/types';
+import { runFailureNotice } from '@/lib/terminal';
+import type {
+  Agent,
+  Project,
+  StartedSession,
+  StartedTerminal,
+} from '@/lib/types';
 import {
   Button,
   c,
@@ -28,6 +47,7 @@ import {
   Loading,
   mono,
   Notice,
+  radius,
   s,
   Sheet,
 } from '@/components/ui';
@@ -36,17 +56,11 @@ import {
   SpeechModelSheet,
 } from '@/components/DictationControl';
 
-const outdatedBridge =
-  'This bridge is too old to start sessions. On your computer, rebuild and restart the Herd Remote bridge, then try again.';
+/** The kind chip for a plain shell (no agent). */
+const TERMINAL = 'terminal';
 
-function isOutdated(reason: unknown) {
-  return (
-    CombinedGraphQLErrors.is(reason) &&
-    reason.errors.some((e) =>
-      /^(Cannot query field|Unknown (argument|type))/.test(e.message),
-    )
-  );
-}
+const outdatedBridge =
+  'This bridge is too old for this. On your computer, rebuild and restart the Herd Remote bridge, then try again.';
 
 /** The pane Herdr opened before the agent failed, and the daemon's code. */
 function openedPane(reason: unknown) {
@@ -60,14 +74,16 @@ function openedPane(reason: unknown) {
   return null;
 }
 
-function startError(reason: unknown) {
+function startError(reason: unknown, terminal: boolean) {
   if (isOutdated(reason)) return outdatedBridge;
   if (
     CombinedGraphQLErrors.is(reason) ||
     (ServerError.is(reason) && reason.statusCode === 401)
   )
     return errorMessage(reason);
-  return 'Delivery is uncertain. Refresh your agents before trying again; the session may already be starting on your computer.';
+  return terminal
+    ? 'Delivery is uncertain. Refresh before trying again; the terminal may already be open on your computer.'
+    : 'Delivery is uncertain. Refresh your agents before trying again; the session may already be starting on your computer.';
 }
 
 export function NewSessionSheet({
@@ -85,6 +101,9 @@ export function NewSessionSheet({
   const { client, activeMachine } = useSession();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [supported, setSupported] = useState<string[]>([]);
+  const [homeFolder, setHomeFolder] = useState<string | null>(null);
+  // False on a bridge older than 0.5.0 (no terminals or home sessions).
+  const [canTerminal, setCanTerminal] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId);
   const [picking, setPicking] = useState(!initialWorkspaceId);
@@ -113,7 +132,7 @@ export function NewSessionSheet({
       .then((result) => {
         if (!alive.current) return;
         if (!result.data) throw new Error('No projects returned.');
-        setProjects(result.data.session.workspaces);
+        setProjects(listedProjects(result.data.session.workspaces));
         setSupported(result.data.agentKinds);
         setLoadError('');
       })
@@ -122,6 +141,17 @@ export function NewSessionSheet({
           setLoadError(
             isOutdated(reason) ? outdatedBridge : errorMessage(reason),
           );
+      });
+    // Separate, so an older bridge still lists projects for agent sessions.
+    client
+      .query<{ homeFolder: string | null }>({ query: HOME_FOLDER })
+      .then((result) => {
+        if (!alive.current) return;
+        setHomeFolder(result.data?.homeFolder ?? null);
+        setCanTerminal(true);
+      })
+      .catch((reason: unknown) => {
+        if (alive.current) setCanTerminal(terminalsSupported(reason));
       });
   }, [client]);
   useEffect(() => {
@@ -132,27 +162,40 @@ export function NewSessionSheet({
     };
   }, [load]);
 
-  const project = projects?.find((p) => p.id === workspaceId) ?? null;
+  const home: Project = { id: HOME, label: 'home folder', cwd: homeFolder };
+  const project =
+    workspaceId === HOME
+      ? home
+      : (projects?.find((p) => p.id === workspaceId) ?? null);
   // A preselected project that has since closed falls back to the list.
   const showPicker = picking || !project;
   const choices = useMemo(
-    () => kindChoices(agents, workspaceId ?? '', supported),
+    () =>
+      kindChoices(
+        agents,
+        workspaceId && workspaceId !== HOME ? workspaceId : '',
+        supported,
+      ),
     [agents, workspaceId, supported],
   );
   const chosenKind = kind || choices.primary[0] || '';
+  const terminal = chosenKind === TERMINAL;
   const taken = agents.map((a) => a.name);
   const name = customName ?? submittedName ?? suggestName(chosenKind, taken);
-  const duplicate = taken.includes(name);
-  const visible = (projects ?? []).filter((p) =>
+  const duplicate = !terminal && taken.includes(name);
+  const unsupported = !canTerminal && (terminal || workspaceId === HOME);
+  const visible = [home, ...(projects ?? [])].filter((p) =>
     [p.label, p.cwd]
       .join(' ')
       .toLowerCase()
       .includes(filter.trim().toLowerCase()),
   );
+  const target = project?.id === HOME ? null : (project?.id ?? null);
+  const place = project?.id === HOME ? 'your home folder' : project?.label;
 
   const choose = (id: string) => {
     if (id !== workspaceId) {
-      setKind('');
+      if (kind !== TERMINAL) setKind('');
       setShowMore(false);
       setSubmittedName(null);
     }
@@ -162,23 +205,87 @@ export function NewSessionSheet({
     setOrphan(null);
   };
 
-  const start = async () => {
-    if (!client || !project || submitting.current) return;
+  const begin = () => {
     submitting.current = true;
     dictation.cancel();
-    // Keep this name for any retry: if the first attempt did start, Herdr
-    // rejects the duplicate instead of opening a second tab.
-    setSubmittedName(name);
-    const firstTask = task.trim() ? task : '';
     setBusy(true);
     setPhase('starting');
     setError('');
     setOrphan(null);
+  };
+  const failed = (reason: unknown, paneId: string | null = null) => {
+    submitting.current = false;
+    if (!alive.current) return;
+    setOrphan(paneId);
+    setError(startError(reason, terminal));
+    setBusy(false);
+  };
+
+  const openTerminal = async () => {
+    if (!client || !project || submitting.current) return;
+    begin();
+    const command = task.trim() ? task : '';
+    let started: StartedTerminal;
+    try {
+      const result = await client.mutate<{ startTerminal: StartedTerminal }>({
+        mutation: START_TERMINAL,
+        variables: { workspaceId: target },
+      });
+      if (!result.data) throw new Error('No terminal returned.');
+      started = result.data.startTerminal;
+    } catch (reason) {
+      failed(reason);
+      return;
+    }
+    const key = `${activeMachine?.id}/${started.paneId}`;
+    if (command && !started.ready) {
+      handOff(key, {
+        draft: command,
+        notice:
+          'The shell was still starting, so your command was not run. It is in the box: tap send when you see the prompt.',
+      });
+    } else if (command) {
+      if (alive.current) setPhase('sending');
+      // Text, then Enter; neither is ever resent.
+      let typed = false;
+      try {
+        await client.mutate({
+          mutation: SEND_TEXT,
+          variables: { paneId: started.paneId, text: command },
+        });
+        typed = true;
+        await client.mutate({
+          mutation: KEYS,
+          variables: { target: started.paneId, keys: ['enter'], raw: true },
+        });
+      } catch {
+        handOff(
+          key,
+          typed
+            ? { draft: '', notice: runFailureNotice(true) }
+            : {
+                draft: command,
+                notice:
+                  'The terminal opened, but your command may not have reached it. Check the terminal before running it again.',
+              },
+        );
+      }
+    }
+    onOpen(started.paneId, true);
+  };
+
+  const startSession = async () => {
+    if (!client || !project || submitting.current) return;
+    begin();
+    // Keep this name for any retry: if the first attempt did start, Herdr
+    // rejects the duplicate instead of opening a second tab.
+    setSubmittedName(name);
+    const firstTask = task.trim() ? task : '';
     let started: StartedSession;
     try {
       const result = await client.mutate<{ startSession: StartedSession }>({
         mutation: START_SESSION,
-        variables: { workspaceId: project.id, kind: chosenKind, name },
+        variables: { workspaceId: target, kind: chosenKind, name },
       });
       if (!result.data) throw new Error('No session returned.');
       started = result.data.startSession;
@@ -195,12 +302,7 @@ export function NewSessionSheet({
         onOpen(opened.paneId, false);
         return;
       }
-      submitting.current = false;
-      if (alive.current) {
-        setOrphan(opened?.paneId ?? null);
-        setError(startError(reason));
-        setBusy(false);
-      }
+      failed(reason, opened?.paneId ?? null);
       return;
     }
     const key = `${activeMachine?.id}/${started.paneId}`;
@@ -233,7 +335,7 @@ export function NewSessionSheet({
   return (
     <Sheet
       visible
-      title={showPicker ? 'Choose a project' : 'New session'}
+      title={showPicker ? 'choose a project' : 'new'}
       onClose={() => {
         if (busy) return;
         if (showPicker && project) setPicking(false);
@@ -243,73 +345,69 @@ export function NewSessionSheet({
       {!!loadError && <Notice message={loadError} danger />}
       {!projects && !loadError && (
         <View style={{ height: 120 }}>
-          <Loading label="Finding your projects…" />
+          <Loading label="finding your projects…" />
         </View>
       )}
       {projects && showPicker && (
         <>
           <Text style={s.muted}>
-            Projects open in Herdr on {activeMachine?.name ?? 'your computer'}.
-            The new agent gets its own tab.
+            Projects open in Herdr on {activeMachine?.name ?? 'your computer'},
+            or your home folder. Each new session or terminal gets its own tab.
           </Text>
           {projects.length > 6 && (
             <Field
-              placeholder="Find a project"
+              placeholder="find a project"
+              accessibilityLabel="Find a project"
               value={filter}
               onChangeText={setFilter}
             />
           )}
-          <View style={{ gap: 8 }}>
-            {visible.map((item) => (
-              <Pressable
-                key={item.id}
-                accessibilityRole="button"
-                accessibilityLabel={`Choose ${item.label}`}
-                accessibilityState={{ selected: item.id === workspaceId }}
-                onPress={() => choose(item.id)}
-                style={({ pressed }) => [
-                  s.row,
-                  {
-                    padding: 14,
-                    borderRadius: 14,
-                    borderWidth: 1,
-                    borderColor: item.id === workspaceId ? c.accent : c.line,
-                    backgroundColor: c.bg,
-                    opacity: pressed ? 0.7 : 1,
-                  },
-                ]}
-              >
-                <FolderOpen size={18} color={c.accent} />
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text
-                    numberOfLines={1}
-                    style={[s.body, { fontWeight: '600' }]}
-                  >
-                    {item.label}
-                  </Text>
-                  {!!item.cwd && (
+          <View style={{ gap: 2 }}>
+            {visible.map((item) => {
+              const selected = item.id === workspaceId;
+              const Icon = item.id === HOME ? House : FolderOpen;
+              return (
+                <Pressable
+                  key={item.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Choose ${item.label}`}
+                  accessibilityState={{ selected }}
+                  onPress={() => choose(item.id)}
+                  style={({ pressed }) => [
+                    s.item,
+                    s.row,
+                    { paddingVertical: 10 },
+                    (selected || pressed) && s.selected,
+                  ]}
+                >
+                  <Icon size={16} color={c.accent} />
+                  <View style={{ flex: 1, gap: 2 }}>
                     <Text
                       numberOfLines={1}
-                      ellipsizeMode="middle"
-                      style={[s.muted, { fontFamily: mono, fontSize: 11 }]}
+                      style={[s.body, { fontWeight: '700' }]}
                     >
-                      {shortPath(item.cwd)}
+                      {item.label}
                     </Text>
+                    {!!item.cwd && (
+                      <Text
+                        numberOfLines={1}
+                        ellipsizeMode="middle"
+                        style={s.eyebrow}
+                      >
+                        {shortPath(item.cwd)}
+                      </Text>
+                    )}
+                  </View>
+                  {selected ? (
+                    <Check size={16} color={c.accent} />
+                  ) : (
+                    <ChevronRight size={16} color={c.dim} />
                   )}
-                </View>
-                {item.id === workspaceId ? (
-                  <Check size={18} color={c.accent} />
-                ) : (
-                  <ChevronRight size={18} color={c.muted} />
-                )}
-              </Pressable>
-            ))}
+                </Pressable>
+              );
+            })}
             {!visible.length && (
-              <Text style={s.muted}>
-                {projects.length
-                  ? 'No open project matches.'
-                  : 'No projects are open in Herdr. Open one on your computer first.'}
-              </Text>
+              <Text style={s.muted}>No open project matches.</Text>
             )}
           </View>
         </>
@@ -324,59 +422,65 @@ export function NewSessionSheet({
               setPicking(true);
               load();
             }}
-            style={[
-              s.row,
-              {
-                padding: 14,
-                borderRadius: 14,
-                borderWidth: 1,
-                borderColor: c.line,
-                backgroundColor: c.bg,
-              },
-            ]}
+            style={[s.item, s.row, s.selected, { paddingVertical: 10 }]}
           >
-            <FolderOpen size={18} color={c.accent} />
+            {project.id === HOME ? (
+              <House size={16} color={c.accent} />
+            ) : (
+              <FolderOpen size={16} color={c.accent} />
+            )}
             <View style={{ flex: 1, gap: 2 }}>
-              <Text numberOfLines={1} style={[s.body, { fontWeight: '600' }]}>
+              <Text numberOfLines={1} style={[s.body, { fontWeight: '700' }]}>
                 {project.label}
               </Text>
               {!!project.cwd && (
                 <Text
                   numberOfLines={1}
                   ellipsizeMode="middle"
-                  style={[s.muted, { fontFamily: mono, fontSize: 11 }]}
+                  style={s.eyebrow}
                 >
                   {shortPath(project.cwd)}
                 </Text>
               )}
             </View>
-            <Text style={{ color: c.accent, fontSize: 13, fontWeight: '600' }}>
-              Change
-            </Text>
+            <Text style={[s.muted, { color: c.accent }]}>change</Text>
           </Pressable>
 
-          <View style={{ gap: 10 }}>
-            <Text style={s.eyebrow}>AGENT</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-              {[...choices.primary, ...(showMore ? choices.more : [])].map(
-                (item) => (
-                  <Button
-                    key={item}
-                    title={item}
-                    accessibilityLabel={`Agent ${item}`}
-                    variant={chosenKind === item ? 'primary' : 'secondary'}
-                    disabled={busy}
-                    onPress={() => {
-                      setKind(item);
-                      setSubmittedName(null);
-                    }}
-                    style={chip}
-                  />
-                ),
-              )}
+          <View style={{ gap: 8 }}>
+            <Text style={s.eyebrow}>run</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              {[
+                ...choices.primary,
+                TERMINAL,
+                ...(showMore ? choices.more : []),
+              ].map((item) => (
+                <Button
+                  key={item}
+                  title={item}
+                  accessibilityLabel={
+                    item === TERMINAL ? 'Plain terminal' : `Agent ${item}`
+                  }
+                  icon={
+                    item === TERMINAL ? (
+                      <TerminalSquare
+                        size={14}
+                        color={chosenKind === item ? c.ink : c.text}
+                      />
+                    ) : undefined
+                  }
+                  variant={chosenKind === item ? 'primary' : 'secondary'}
+                  disabled={busy}
+                  onPress={() => {
+                    setKind(item);
+                    setSubmittedName(null);
+                  }}
+                  style={chip}
+                />
+              ))}
               {!!choices.more.length && (
                 <Button
-                  title={showMore ? 'Fewer' : 'More…'}
+                  title={showMore ? 'fewer' : 'more…'}
+                  accessibilityLabel={showMore ? 'Fewer agents' : 'More agents'}
                   variant="ghost"
                   disabled={busy}
                   onPress={() => setShowMore((value) => !value)}
@@ -386,62 +490,69 @@ export function NewSessionSheet({
             </View>
           </View>
 
-          {customName === null ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Agent name ${name}. Edit name`}
-              disabled={busy}
-              onPress={() => setCustomName(name)}
-              style={[s.row, { gap: 8, minHeight: 32 }]}
-            >
-              <Text style={s.muted}>Name</Text>
-              <Text style={[s.body, { fontFamily: mono, fontSize: 13 }]}>
-                {name}
-              </Text>
-              <Pencil size={14} color={c.muted} />
-            </Pressable>
-          ) : (
-            <Field
-              label="Agent name"
-              value={customName}
-              onChangeText={(value) => setCustomName(value.toLowerCase())}
-              editable={!busy}
-              maxLength={32}
-              autoFocus
-            />
-          )}
-          {customName !== null && !validAgentName(customName) && (
-            <Text style={{ color: c.amber, fontSize: 12 }}>
+          {!terminal &&
+            (customName === null ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Agent name ${name}. Edit name`}
+                disabled={busy}
+                onPress={() => setCustomName(name)}
+                style={[s.row, { gap: 8, minHeight: 32 }]}
+              >
+                <Text style={s.muted}>name</Text>
+                <Text style={s.body}>{name}</Text>
+                <Pencil size={13} color={c.dim} />
+              </Pressable>
+            ) : (
+              <Field
+                label="agent name"
+                accessibilityLabel="Agent name"
+                value={customName}
+                onChangeText={(value) => setCustomName(value.toLowerCase())}
+                editable={!busy}
+                maxLength={32}
+                autoFocus
+              />
+            ))}
+          {!terminal && customName !== null && !validAgentName(customName) && (
+            <Text style={[s.muted, { color: c.amber }]}>
               Start with a letter; use lowercase letters, digits, - or _.
             </Text>
           )}
           {/* After a failed start Herdr may still hold the name; the error explains. */}
           {duplicate && !busy && !error && (
-            <Text style={{ color: c.amber, fontSize: 12 }}>
+            <Text style={[s.muted, { color: c.amber }]}>
               Another agent is already named {name}. Choose a different name.
             </Text>
           )}
 
-          <View style={{ gap: 10 }}>
-            <Text style={s.eyebrow}>FIRST TASK · OPTIONAL</Text>
+          <View style={{ gap: 8 }}>
+            <Text style={s.eyebrow}>
+              {terminal ? 'first command · optional' : 'first task · optional'}
+            </Text>
             <View style={[s.row, { gap: 8, alignItems: 'flex-end' }]}>
               <TextInput
-                accessibilityLabel="First task"
-                placeholder="What should it work on?"
-                placeholderTextColor={c.muted}
+                accessibilityLabel={terminal ? 'First command' : 'First task'}
+                placeholder={
+                  terminal ? 'e.g. git status' : 'what should it work on?'
+                }
+                placeholderTextColor={c.dim}
                 multiline
                 value={task}
                 onChangeText={setTask}
                 editable={!busy && !dictation.listening}
                 selectionColor={c.accent}
+                autoCapitalize={terminal ? 'none' : 'sentences'}
+                autoCorrect={!terminal}
                 style={{
                   flex: 1,
                   color: c.text,
+                  fontFamily: mono,
                   backgroundColor: c.bg,
-                  borderRadius: 12,
+                  borderRadius: radius,
                   borderWidth: 1,
                   borderColor: c.line,
-                  minHeight: 64,
+                  minHeight: terminal ? 46 : 64,
                   maxHeight: 140,
                   fontSize: 14,
                   paddingHorizontal: 12,
@@ -463,14 +574,14 @@ export function NewSessionSheet({
             {dictation.listening ? (
               <Text
                 accessibilityLiveRegion="polite"
-                style={{ color: c.red, fontSize: 12 }}
+                style={[s.muted, { color: c.red }]}
               >
-                ● Listening in {languageInfo(dictation.language).name} · tap ■
+                ● listening in {languageInfo(dictation.language).name} · tap ■
                 to stop
               </Text>
             ) : (
               !!dictation.notice && (
-                <Text style={{ color: c.amber, fontSize: 12 }}>
+                <Text style={[s.muted, { color: c.amber }]}>
                   {dictation.notice}
                 </Text>
               )
@@ -478,16 +589,19 @@ export function NewSessionSheet({
           </View>
 
           <Text style={s.muted}>
-            Opens a new tab in {project.label} on your computer and starts{' '}
-            {chosenKind || 'the agent'} there. Your other agents keep running
-            untouched.
+            {terminal
+              ? `Opens a new tab in ${place} on your computer with a plain shell.`
+              : `Opens a new tab in ${place} on your computer and starts ${chosenKind || 'the agent'} there.`}{' '}
+            Your other agents keep running untouched.
           </Text>
+          {unsupported && <Notice message={outdatedBridge} danger />}
           {!!error && <Notice message={error} danger />}
           {!!orphan && (
             <Button
-              title="Open the new terminal"
+              title="open the new terminal"
+              accessibilityLabel="Open the new terminal"
               variant="secondary"
-              icon={<TerminalSquare size={16} color={c.text} />}
+              icon={<TerminalSquare size={15} color={c.text} />}
               onPress={() => {
                 // Keep the typed task; the shell's Type mode sends no Enter.
                 if (task.trim())
@@ -502,24 +616,34 @@ export function NewSessionSheet({
           <Button
             title={
               !busy
-                ? 'Start session'
+                ? terminal
+                  ? 'open terminal'
+                  : 'start session'
                 : phase === 'sending'
-                  ? 'Sending first task…'
-                  : `Starting ${chosenKind}…`
+                  ? terminal
+                    ? 'running your command…'
+                    : 'sending first task…'
+                  : terminal
+                    ? 'opening terminal…'
+                    : `starting ${chosenKind}…`
             }
+            accessibilityLabel={terminal ? 'Open terminal' : 'Start session'}
             busy={busy}
             disabled={
-              !validAgentName(name) ||
-              !validAgentName(chosenKind) ||
-              duplicate ||
-              !!loadError
+              unsupported ||
+              !!loadError ||
+              (!terminal &&
+                (!validAgentName(name) ||
+                  !validAgentName(chosenKind) ||
+                  duplicate))
             }
-            onPress={() => void start()}
+            onPress={() => void (terminal ? openTerminal() : startSession())}
           />
           {busy && phase === 'starting' && (
-            <Text style={{ color: c.amber, fontSize: 12 }}>
-              Waiting for {chosenKind} to be ready. This can take about 40
-              seconds.
+            <Text style={[s.muted, { color: c.amber }]}>
+              {terminal
+                ? 'Waiting for the shell prompt. This takes a few seconds.'
+                : `Waiting for ${chosenKind} to be ready. This can take about 40 seconds.`}
             </Text>
           )}
         </>
@@ -534,8 +658,7 @@ export function NewSessionSheet({
 }
 
 const chip = {
-  minHeight: 38,
-  paddingVertical: 7,
-  paddingHorizontal: 13,
-  borderRadius: 10,
+  minHeight: 36,
+  paddingVertical: 6,
+  paddingHorizontal: 11,
 };

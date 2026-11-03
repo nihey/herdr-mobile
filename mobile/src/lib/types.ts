@@ -47,3 +47,9 @@ export type StartedSession = {
   kind: string;
   ready: boolean;
 };
+export type StartedTerminal = {
+  paneId: string;
+  tabId: string;
+  workspaceId: string;
+  ready: boolean;
+};

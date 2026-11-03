@@ -1,4 +1,5 @@
-import type { Agent } from './types';
+import { CombinedGraphQLErrors } from '@apollo/client/errors';
+import type { Agent, Project } from './types';
 
 const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 const FALLBACK_KINDS = ['claude', 'codex'];
@@ -65,4 +66,29 @@ export function shortPath(path: string | null | undefined) {
 /** Terminal title without leading status glyphs such as ✳ or spinners. */
 export function cleanTitle(title: string | null | undefined) {
   return (title ?? '').replace(/^[\p{So}\s·•]+/u, '').trim();
+}
+
+/** The bridge's home workspace label (terminals started in the home folder). */
+export const HOME_LABEL = 'phone';
+/** Sheet-only choice for the home folder; sent to the bridge as null. */
+export const HOME = '~home';
+
+/** Open projects to offer; the home workspace is the Home folder entry. */
+export function listedProjects(projects: Project[]) {
+  return projects.filter((project) => project.label !== HOME_LABEL);
+}
+
+/** Errors from a bridge that predates a queried field or argument. */
+export function isOutdated(reason: unknown) {
+  return (
+    CombinedGraphQLErrors.is(reason) &&
+    reason.errors.some((e) =>
+      /^(Cannot query field|Unknown (argument|type))/.test(e.message),
+    )
+  );
+}
+
+/** Whether the bridge can open terminals and home sessions (0.5.0+). */
+export function terminalsSupported(reason: unknown) {
+  return !isOutdated(reason);
 }

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { CombinedGraphQLErrors } from '@apollo/client/errors';
 import {
   attentionOrder,
   cleanTitle,
   kindChoices,
+  listedProjects,
   shortPath,
   suggestName,
+  terminalsSupported,
   validAgentName,
 } from './sessions';
 import { clearHandoff, handOff, peekHandoff } from './handoff';
@@ -115,5 +118,23 @@ describe('draft handoff', () => {
     expect(peekHandoff('m2/p1')).toBeUndefined();
     clearHandoff('m1/p1');
     expect(peekHandoff('m1/p1')).toBeUndefined();
+  });
+});
+
+describe('terminals and the home folder', () => {
+  it('hides the phone workspace from the project list', () => {
+    const projects = [
+      { id: 'w1', label: 'api', cwd: '/a' },
+      { id: 'w7', label: 'phone', cwd: '/h' },
+    ];
+    expect(listedProjects(projects).map((p) => p.id)).toEqual(['w1']);
+  });
+  it('treats an old bridge as not supporting terminals', () => {
+    const old = new CombinedGraphQLErrors({
+      errors: [{ message: 'Cannot query field "homeFolder" on type "Query".' }],
+    });
+    expect(terminalsSupported(old)).toBe(false);
+    expect(terminalsSupported(null)).toBe(true);
+    expect(terminalsSupported(new Error('Network request failed'))).toBe(true);
   });
 });

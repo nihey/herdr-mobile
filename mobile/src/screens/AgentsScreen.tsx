@@ -445,7 +445,8 @@ export function AgentsScreen() {
           </>
         )}
       </ScrollView>
-      {!!data?.workspaces.length && (
+      {/* Home terminals work even with no project open. */}
+      {!!data && (
         <View
           pointerEvents="box-none"
           style={{

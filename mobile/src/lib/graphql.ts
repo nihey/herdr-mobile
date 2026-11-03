@@ -131,13 +131,29 @@ export const NEW_SESSION_OPTIONS = gql`
   }
 `;
 export const START_SESSION = gql`
-  mutation StartSession($workspaceId: ID!, $kind: String!, $name: String!) {
+  mutation StartSession($workspaceId: ID, $kind: String!, $name: String!) {
     startSession(workspaceId: $workspaceId, kind: $kind, name: $name) {
       paneId
       tabId
       workspaceId
       name
       kind
+      ready
+    }
+  }
+`;
+// Fetched on its own: a 0.4.0 bridge rejects it but still serves the sheet.
+export const HOME_FOLDER = gql`
+  query HomeFolder {
+    homeFolder
+  }
+`;
+export const START_TERMINAL = gql`
+  mutation StartTerminal($workspaceId: ID) {
+    startTerminal(workspaceId: $workspaceId) {
+      paneId
+      tabId
+      workspaceId
       ready
     }
   }
