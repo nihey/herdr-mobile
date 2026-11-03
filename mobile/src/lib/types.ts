@@ -53,3 +53,24 @@ export type StartedTerminal = {
   workspaceId: string;
   ready: boolean;
 };
+export type HermesChip = {
+  kind: 'READ' | 'SENT' | 'STARTED';
+  paneId: string;
+  title: string | null;
+};
+export type HermesMessage = {
+  id: string;
+  role: 'USER' | 'HERMES';
+  text: string;
+  stopped: boolean;
+  at: string;
+  chips: HermesChip[];
+};
+export type Hermes = {
+  status: 'STARTING' | 'READY' | 'UNAVAILABLE';
+  reason: string | null;
+  model: string | null;
+  modelNote: string | null;
+  working: boolean;
+  messages: HermesMessage[];
+};

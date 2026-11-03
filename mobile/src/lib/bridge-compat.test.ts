@@ -17,7 +17,16 @@ const currentSdl = /typeDefs: \/\* GraphQL \*\/ `([^`]*)`/.exec(
 const frozen040 = readFileSync(join(here, 'bridge-0.4.0.graphql'), 'utf8');
 // Only these may fail on a 0.4.0 bridge; the app detects that and asks the
 // user to update instead of breaking agent sessions in projects.
-const needs050 = ['HOME_FOLDER', 'START_TERMINAL', 'START_HOME_SESSION'];
+const needsNewer = [
+  'HOME_FOLDER',
+  'START_TERMINAL',
+  'START_HOME_SESSION',
+  'HERMES',
+  'HERMES_SUMMARY',
+  'HERMES_SEND',
+  'HERMES_STOP',
+  'HERMES_NEW',
+];
 
 const documents = Object.entries(operations).filter(
   (entry): entry is [string, DocumentNode] =>
@@ -36,7 +45,7 @@ describe('app operations against bridge schemas', () => {
   it.each(documents)('%s matches the current bridge', (_name, document) => {
     expect(errorsAgainst(currentSdl ?? '', document)).toEqual([]);
   });
-  it.each(documents.filter(([name]) => !needs050.includes(name)))(
+  it.each(documents.filter(([name]) => !needsNewer.includes(name)))(
     '%s still works against a 0.4.0 bridge',
     (_name, document) => {
       expect(errorsAgainst(frozen040, document)).toEqual([]);
