@@ -2,7 +2,10 @@
  * Hands a draft to the next terminal screen in memory, keyed by
  * `<machineId>/<paneId>`. Prompt text never goes into route parameters.
  */
-export type Handoff = { draft: string; notice: string };
+import type { ComposerMode } from './terminal';
+
+/** `mode` overrides the terminal screen's first composer mode. */
+export type Handoff = { draft: string; notice: string; mode?: ComposerMode };
 
 const pending = new Map<string, Handoff>();
 

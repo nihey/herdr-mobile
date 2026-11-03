@@ -137,4 +137,24 @@ describe('terminals and the home folder', () => {
     expect(terminalsSupported(null)).toBe(true);
     expect(terminalsSupported(new Error('Network request failed'))).toBe(true);
   });
+  it('treats a 0.4.0 bridge rejecting a home session as outdated', () => {
+    const required = new CombinedGraphQLErrors({
+      errors: [
+        {
+          message:
+            'Field "startSession" argument "workspaceId" of type "ID!" is required, but it was not provided.',
+        },
+      ],
+    });
+    const variable = new CombinedGraphQLErrors({
+      errors: [
+        {
+          message:
+            'Variable "$workspaceId" of type "ID" used in position expecting type "ID!".',
+        },
+      ],
+    });
+    expect(terminalsSupported(required)).toBe(false);
+    expect(terminalsSupported(variable)).toBe(false);
+  });
 });

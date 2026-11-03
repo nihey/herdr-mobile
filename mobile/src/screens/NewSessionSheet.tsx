@@ -17,6 +17,7 @@ import {
   NEW_SESSION_OPTIONS,
   PROMPT,
   SEND_TEXT,
+  START_HOME_SESSION,
   START_SESSION,
   START_TERMINAL,
 } from '@/lib/graphql';
@@ -284,8 +285,15 @@ export function NewSessionSheet({
     let started: StartedSession;
     try {
       const result = await client.mutate<{ startSession: StartedSession }>({
-        mutation: START_SESSION,
-        variables: { workspaceId: target, kind: chosenKind, name },
+        ...(target === null
+          ? {
+              mutation: START_HOME_SESSION,
+              variables: { kind: chosenKind, name },
+            }
+          : {
+              mutation: START_SESSION,
+              variables: { workspaceId: target, kind: chosenKind, name },
+            }),
       });
       if (!result.data) throw new Error('No session returned.');
       started = result.data.startSession;
@@ -603,11 +611,13 @@ export function NewSessionSheet({
               variant="secondary"
               icon={<TerminalSquare size={15} color={c.text} />}
               onPress={() => {
-                // Keep the typed task; the shell's Type mode sends no Enter.
+                // Keep the typed task in Type mode (no Enter): it was meant
+                // for an agent, so it must never run as a shell command.
                 if (task.trim())
                   handOff(`${activeMachine?.id}/${orphan}`, {
                     draft: task,
                     notice: '',
+                    mode: 'type',
                   });
                 onOpen(orphan, true);
               }}

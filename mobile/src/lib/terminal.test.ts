@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   effectiveMode,
+  initialMode,
   newLineCount,
+  paneHasAgent,
   nextMode,
   runFailureNotice,
 } from './terminal';
@@ -58,5 +60,19 @@ describe('composer modes', () => {
   it('says a typed command was not run when Enter failed', () => {
     expect(runFailureNotice(true)).toMatch(/typed.*not run/i);
     expect(runFailureNotice(false)).toMatch(/may not have reached/i);
+  });
+});
+
+describe('before the first snapshot', () => {
+  it('keeps the route kind until Herdr reports the pane', () => {
+    expect(paneHasAgent(false, false, false)).toBe(true);
+    expect(paneHasAgent(false, false, true)).toBe(false);
+    expect(paneHasAgent(true, false, false)).toBe(false);
+    expect(paneHasAgent(true, true, true)).toBe(true);
+  });
+  it('opens in the handed-off mode, else Run for shells and Prompt for agents', () => {
+    expect(initialMode(true)).toBe('run');
+    expect(initialMode(false)).toBe('prompt');
+    expect(initialMode(true, 'type')).toBe('type');
   });
 });

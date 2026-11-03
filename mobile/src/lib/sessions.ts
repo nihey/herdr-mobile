@@ -78,13 +78,13 @@ export function listedProjects(projects: Project[]) {
   return projects.filter((project) => project.label !== HOME_LABEL);
 }
 
-/** Errors from a bridge that predates a queried field or argument. */
+/** Validation errors from a bridge that predates a field or argument. */
+const OUTDATED =
+  /^(Cannot query field|Unknown (argument|type))|argument "[^"]+" of type "[^"]+" is required|^Variable "\$[^"]+" of type "[^"]+" used in position expecting/;
 export function isOutdated(reason: unknown) {
   return (
     CombinedGraphQLErrors.is(reason) &&
-    reason.errors.some((e) =>
-      /^(Cannot query field|Unknown (argument|type))/.test(e.message),
-    )
+    reason.errors.some((e) => OUTDATED.test(e.message))
   );
 }
 

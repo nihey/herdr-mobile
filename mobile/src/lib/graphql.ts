@@ -131,7 +131,7 @@ export const NEW_SESSION_OPTIONS = gql`
   }
 `;
 export const START_SESSION = gql`
-  mutation StartSession($workspaceId: ID, $kind: String!, $name: String!) {
+  mutation StartSession($workspaceId: ID!, $kind: String!, $name: String!) {
     startSession(workspaceId: $workspaceId, kind: $kind, name: $name) {
       paneId
       tabId
@@ -154,6 +154,20 @@ export const START_TERMINAL = gql`
       paneId
       tabId
       workspaceId
+      ready
+    }
+  }
+`;
+// A session in the home folder (no workspace). Kept apart from START_SESSION,
+// whose non-null workspace still validates on a 0.4.0 bridge.
+export const START_HOME_SESSION = gql`
+  mutation StartHomeSession($kind: String!, $name: String!) {
+    startSession(kind: $kind, name: $name) {
+      paneId
+      tabId
+      workspaceId
+      name
+      kind
       ready
     }
   }

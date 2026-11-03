@@ -65,3 +65,24 @@ export function runFailureNotice(typed: boolean): string {
     ? 'Your command was typed but not run: Enter may not have reached the terminal. Check it, then tap enter on the key row to run it.'
     : 'Your command may not have reached the terminal. Check it before sending it again.';
 }
+
+/**
+ * Whether to treat the pane as an agent. Until the first snapshot arrives,
+ * trust the route (agent or plain shell) so an agent never gets Run, which
+ * would type into a question and press Enter.
+ */
+export function paneHasAgent(
+  snapshotLoaded: boolean,
+  agentFound: boolean,
+  raw: boolean,
+): boolean {
+  return snapshotLoaded ? agentFound : !raw;
+}
+
+/** The composer's first mode: a handed-off one, else by route kind. */
+export function initialMode(
+  raw: boolean,
+  handedOff?: ComposerMode,
+): ComposerMode {
+  return handedOff ?? (raw ? 'run' : 'prompt');
+}

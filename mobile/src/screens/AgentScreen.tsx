@@ -17,8 +17,10 @@ import { KEYS, OUTPUT, PROMPT, SEND_TEXT } from '@/lib/graphql';
 import { errorMessage } from '@/lib/errors';
 import {
   effectiveMode,
+  initialMode,
   newLineCount,
   nextMode,
+  paneHasAgent,
   runFailureNotice,
   type ComposerMode,
 } from '@/lib/terminal';
@@ -105,13 +107,16 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
   const snapshot = useSnapshot();
   const agent = snapshot.data?.agents.find((item) => item.paneId === paneId);
   const pane = snapshot.data?.panes.find((item) => item.id === paneId);
-  // An agent started by hand in a plain shell gets the agent controls.
-  const hasAgent = !!agent;
+  // An agent started by hand in a plain shell gets the agent controls; until
+  // the first snapshot, the route says which kind of pane this is.
+  const hasAgent = paneHasAgent(!!snapshot.data, !!agent, raw);
 
   const [source, setSource] = useState<Source>('RECENT');
   const [draft, setDraft] = useState(handoff?.draft ?? '');
   // Plain shells start in Run, agents in Prompt; Type never presses Enter.
-  const [mode, setMode] = useState<ComposerMode>(raw ? 'run' : 'prompt');
+  const [mode, setMode] = useState<ComposerMode>(() =>
+    initialMode(raw, handoff?.mode),
+  );
   const composer = effectiveMode(mode, hasAgent);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(
@@ -294,8 +299,10 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
               {name}
             </Text>
             <View style={[s.row, { gap: 6 }]}>
-              {hasAgent ? (
+              {agent ? (
                 <Status status={agent.status} pulse />
+              ) : hasAgent ? (
+                <Status status="unknown" />
               ) : (
                 // A plain shell has no agent status to show.
                 <Text style={[s.muted, { color: c.accent }]}>$</Text>

@@ -1,0 +1,88 @@
+# Bridge 0.4.0 schema, frozen: the app must keep working against it.
+enum OutputSource {
+  RECENT
+  VISIBLE
+}
+type Workspace {
+  id: ID!
+  label: String!
+  status: String!
+  cwd: String
+}
+type Tab {
+  id: ID!
+  workspaceId: ID!
+  label: String!
+}
+type Agent {
+  paneId: ID!
+  workspaceId: ID!
+  tabId: ID!
+  name: String
+  kind: String
+  title: String
+  cwd: String
+  status: String!
+  interactiveReady: Boolean
+}
+type Pane {
+  id: ID!
+  workspaceId: ID!
+  tabId: ID!
+  label: String
+  title: String
+  cwd: String
+  kind: String
+  status: String!
+}
+type Session {
+  version: String!
+  protocol: Int!
+  workspaces: [Workspace!]!
+  tabs: [Tab!]!
+  agents: [Agent!]!
+  panes: [Pane!]!
+}
+type Output {
+  text: String!
+  fetchedAt: String!
+}
+type ActionResult {
+  ok: Boolean!
+}
+type StartedSession {
+  paneId: ID!
+  tabId: ID!
+  workspaceId: ID!
+  name: String!
+  kind: String!
+  "False when the agent had not finished starting within the time limit."
+  ready: Boolean!
+}
+type DiscoveredMachine {
+  id: ID!
+  name: String!
+  dnsName: String
+  os: String
+  addresses: [String!]!
+  online: Boolean!
+  self: Boolean!
+}
+type Query {
+  discoveredMachines: [DiscoveredMachine!]!
+  session: Session!
+  agentKinds: [String!]!
+  output(
+    target: ID!
+    source: OutputSource = RECENT
+    lines: Int = 200
+    raw: Boolean = false
+  ): Output!
+}
+type Mutation {
+  prompt(target: ID!, text: String!): ActionResult!
+  sendKeys(target: ID!, keys: [String!]!, raw: Boolean = false): ActionResult!
+  sendText(paneId: ID!, text: String!): ActionResult!
+  startAgent(paneId: ID!, name: String!, kind: String!): ActionResult!
+  startSession(workspaceId: ID!, kind: String!, name: String!): StartedSession!
+}
