@@ -135,7 +135,7 @@ class Host:
                 "api_key": settings.get("apiKey") or "none",
             }
         resolved = resolve_runtime_provider(
-            requested=settings["provider"], target_model=settings["model"]
+            requested=settings["provider"] or None, target_model=settings["model"] or None
         )
         return {
             "provider": resolved.get("provider"),
@@ -182,16 +182,7 @@ class Host:
         return to_history(messages)
 
     def ready(self, probe):
-        default_model = default_provider = None
-        try:
-            model = (load_config_readonly() or {}).get("model")
-            if isinstance(model, dict):
-                default_model = model.get("default") or None
-                default_provider = model.get("provider") or None
-            elif isinstance(model, str):
-                default_model = model or None
-        except Exception:  # noqa: BLE001
-            pass
+        default_model, default_provider = configured_default()
         emit({
             "type": "ready",
             "sessionId": self.session_id,
@@ -205,6 +196,10 @@ class Host:
     # ---- messages ---------------------------------------------------------
 
     def start(self, message):
+        if not message.get("model"):
+            # No model chosen by the bridge: Hermes's own configured default.
+            default_model, default_provider = configured_default()
+            message = {**message, "model": default_model or "", "provider": default_provider or ""}
         self.settings = message
         self.register_tools(message.get("tools") or [])
         try:
@@ -257,6 +252,19 @@ class Host:
         if self.turn_id and message.get("turnId") == self.turn_id:
             self.agent.hard_interrupt()
             self.release_pending()
+
+
+def configured_default():
+    """Hermes's configured default model and provider, read-only."""
+    try:
+        model = (load_config_readonly() or {}).get("model")
+    except Exception:  # noqa: BLE001
+        return None, None
+    if isinstance(model, dict):
+        return model.get("default") or None, model.get("provider") or None
+    if isinstance(model, str):
+        return model or None, None
+    return None, None
 
 
 def new_session_id():
