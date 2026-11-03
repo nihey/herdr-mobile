@@ -28,6 +28,7 @@ import {
   Loading,
   mono,
   Notice,
+  radius,
   s,
   Screen,
   Status,
@@ -40,20 +41,21 @@ import {
 type Source = 'RECENT' | 'VISIBLE';
 
 const sources: { label: string; value: Source }[] = [
-  { label: 'Recent', value: 'RECENT' },
-  { label: 'Screen', value: 'VISIBLE' },
+  { label: 'recent', value: 'RECENT' },
+  { label: 'screen', value: 'VISIBLE' },
 ];
+// One line that scrolls sideways; it never wraps.
 const keys = [
-  { label: 'Esc', key: 'esc' },
-  { label: 'Tab', key: 'tab' },
-  { label: '↑', key: 'up' },
-  { label: '↓', key: 'down' },
-  { label: 'Enter ↵', key: 'enter' },
-  { label: 'Ctrl+C', key: 'ctrl+c' },
-  { label: 'y', key: 'y' },
-  { label: 'n', key: 'n' },
-  { label: '←', key: 'left' },
-  { label: '→', key: 'right' },
+  { label: 'esc', name: 'Escape', key: 'esc' },
+  { label: 'tab', name: 'Tab', key: 'tab' },
+  { label: '↑', name: 'Up arrow', key: 'up' },
+  { label: '↓', name: 'Down arrow', key: 'down' },
+  { label: '←', name: 'Left arrow', key: 'left' },
+  { label: '→', name: 'Right arrow', key: 'right' },
+  { label: 'enter', name: 'Enter', key: 'enter' },
+  { label: '^C', name: 'Ctrl+C', key: 'ctrl+c' },
+  { label: 'y', name: 'y', key: 'y' },
+  { label: 'n', name: 'n', key: 'n' },
 ];
 
 function timeSinceLabel(date: string | undefined): string {
@@ -265,7 +267,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
         <View
           style={{
             flex: 1,
-            backgroundColor: '#0B100C',
+            backgroundColor: c.bg,
             borderTopWidth: 1,
             borderBottomWidth: 1,
             borderColor: c.line,
@@ -285,8 +287,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                   style={{
                     minHeight: 30,
                     paddingVertical: 4,
-                    paddingHorizontal: 11,
-                    borderRadius: 8,
+                    paddingHorizontal: 10,
                   }}
                 />
               ))}
@@ -294,19 +295,16 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
             <View style={[s.row, { gap: 8 }]}>
               <Text
                 numberOfLines={1}
-                style={[
-                  s.muted,
-                  { fontFamily: mono, fontSize: 9, lineHeight: 12 },
-                ]}
+                style={[s.eyebrow, { fontSize: 10, lineHeight: 13 }]}
               >
                 {output.error
-                  ? 'OFFLINE · CACHED'
+                  ? 'offline · cached'
                   : output.data
                     ? timeSinceLabel(output.data.fetchedAt)
-                    : 'SYNCING'}
+                    : 'syncing'}
               </Text>
               <LiveBadge active={following && agent?.status === 'working'} />
-              <LiveBadge active={!following} label="PAUSED" tone="paused" />
+              <LiveBadge active={!following} label="paused" tone="paused" />
             </View>
           </View>
           {output.loading && !output.data ? (
@@ -343,7 +341,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
               <Text
                 selectable
                 style={{
-                  color: '#DBE5D6',
+                  color: c.term,
                   fontFamily: mono,
                   fontSize: 12,
                   lineHeight: 19,
@@ -385,7 +383,6 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                   minHeight: 36,
                   paddingVertical: 7,
                   paddingHorizontal: 14,
-                  borderRadius: 18,
                 }}
               />
             </View>
@@ -406,14 +403,15 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
               <Button
                 key={item.key}
                 title={item.label}
+                accessibilityLabel={`Send ${item.name}`}
                 variant={item.key === 'ctrl+c' ? 'danger' : 'secondary'}
                 disabled={busy || offline}
                 onPress={() => sendKey(item.key)}
                 style={{
                   minHeight: 36,
+                  minWidth: 40,
                   paddingVertical: 6,
-                  paddingHorizontal: 12,
-                  borderRadius: 9,
+                  paddingHorizontal: 11,
                 }}
               />
             ))}
@@ -422,16 +420,26 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
             {blocked && !typeText && (
               <Text
                 numberOfLines={1}
-                style={{ color: c.amber, fontSize: 11, lineHeight: 15 }}
+                style={{
+                  color: c.red,
+                  fontFamily: mono,
+                  fontSize: 11,
+                  lineHeight: 15,
+                }}
               >
-                Needs input · answer with Type or the keys above.
+                ● needs input · answer with type or the keys above.
               </Text>
             )}
             {dictation.listening ? (
               <Text
                 accessibilityLiveRegion="polite"
                 numberOfLines={1}
-                style={{ color: c.red, fontSize: 11, lineHeight: 15 }}
+                style={{
+                  color: c.red,
+                  fontFamily: mono,
+                  fontSize: 11,
+                  lineHeight: 15,
+                }}
               >
                 ● Listening in {languageInfo(dictation.language).name} · tap ■
                 to stop
@@ -440,7 +448,12 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
               <Text
                 accessibilityLiveRegion="polite"
                 numberOfLines={2}
-                style={{ color: c.amber, fontSize: 11, lineHeight: 15 }}
+                style={{
+                  color: c.amber,
+                  fontFamily: mono,
+                  fontSize: 11,
+                  lineHeight: 15,
+                }}
               >
                 {dictation.notice}
               </Text>
@@ -449,7 +462,12 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                 <Text
                   accessibilityLiveRegion="polite"
                   numberOfLines={1}
-                  style={{ color: c.accent, fontSize: 11, lineHeight: 15 }}
+                  style={{
+                    color: c.accent,
+                    fontFamily: mono,
+                    fontSize: 11,
+                    lineHeight: 15,
+                  }}
                 >
                   {sent}
                 </Text>
@@ -482,7 +500,7 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                 placeholder={
                   typeText ? 'Text · no Enter' : 'Prompt · sends Enter'
                 }
-                placeholderTextColor={c.muted}
+                placeholderTextColor={c.dim}
                 multiline
                 value={draft}
                 onChangeText={(value) => {
@@ -494,8 +512,9 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
                 style={{
                   flex: 1,
                   color: c.text,
+                  fontFamily: mono,
                   backgroundColor: c.panel,
-                  borderRadius: 12,
+                  borderRadius: radius,
                   borderWidth: 1,
                   borderColor: c.line,
                   minHeight: 42,
