@@ -24,18 +24,18 @@ The chosen mockup is `.superpowers/brainstorm/336641-1793711216/content/look.htm
 
 - Colors sampled from the user's screen (GNOME Terminal's default dark scheme plus Herdr's default catppuccin theme). The current green palette goes away entirely.
 
-  | Token | Value | Use |
-  |---|---|---|
-  | background | `#171421` | every screen, the terminal output, the launch screen |
-  | terminal text | `#D0CFCC` | terminal output |
-  | panel | `#1E1E2E` | counters, inputs, keys |
-  | surface / line | `#313244` | borders, pressed states |
-  | text | `#CDD6F4` | names, headings |
-  | muted | `#A6ADC8`, dim `#6C7086` | secondary text, meta lines, labels |
-  | accent | `#89B4FA` | buttons, selection, prompts, links |
-  | needs input | `#F38BA8` | status, Ctrl+C, errors |
-  | working | `#F9E2AF` | status |
-  | done | `#A6E3A1` | status, success |
+  | Token          | Value                    | Use                                                  |
+  | -------------- | ------------------------ | ---------------------------------------------------- |
+  | background     | `#171421`                | every screen, the terminal output, the launch screen |
+  | terminal text  | `#D0CFCC`                | terminal output                                      |
+  | panel          | `#1E1E2E`                | counters, inputs, keys                               |
+  | surface / line | `#313244`                | borders, pressed states                              |
+  | text           | `#CDD6F4`                | names, headings                                      |
+  | muted          | `#A6ADC8`, dim `#6C7086` | secondary text, meta lines, labels                   |
+  | accent         | `#89B4FA`                | buttons, selection, prompts, links                   |
+  | needs input    | `#F38BA8`                | status, Ctrl+C, errors                               |
+  | working        | `#F9E2AF`                | status                                               |
+  | done           | `#A6E3A1`                | status, success                                      |
 
 - Monospace everywhere, lowercase labels ("agents", "working", "new"), Herdr's status marks (● needs input, ◐ working, ✓ done, ○ idle), and highlighted rows (accent at about 14 % opacity with a 2 px accent left edge) instead of rounded cards. Corners are small (about 4 px).
 - The terminal key row (Esc, Tab, arrows, Enter, Ctrl+C) is a single line that scrolls sideways. It never wraps.

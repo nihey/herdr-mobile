@@ -25,6 +25,8 @@ writeFileSync(
   ].join('\n'),
 );
 chmodSync(join(fakeBin, 'codex'), 0o755);
+// Home terminals open here instead of the developer's real home folder.
+const fakeHome = mkdtempSync(join(tmpdir(), 'herdr-mobile-home-'));
 // Like a slow ~/.bashrc: the shell runs a child for a second before its prompt,
 // so startSession has to wait for the shell to be available.
 writeFileSync(join(fakeBin, 'shrc'), 'sleep 1\n');
@@ -68,7 +70,11 @@ try {
   assert(socketPath.includes(`/sessions/${name}/`));
   client = new HerdrClient(socketPath);
   const token = randomBytes(32).toString('hex');
-  const app = createBridge({ token, request: client.request.bind(client) });
+  const app = createBridge({
+    token,
+    request: client.request.bind(client),
+    homeDir: fakeHome,
+  });
   const execute = async <T>(query: string, variables = {}) => {
     const response = await app(
       new Request('http://localhost/graphql', {
@@ -222,12 +228,83 @@ try {
     await waitFor(sessionPane, (text) => text.includes('received: first task')),
     'The new session did not receive its first task.',
   );
+  // Plain terminal in the project: a new tab with a shell, nothing typed.
+  const opened = await execute<{
+    startTerminal: { paneId: string; tabId: string; ready: boolean };
+  }>('mutation($w:ID){startTerminal(workspaceId:$w){paneId tabId ready}}', {
+    w: workspaceId,
+  });
+  const terminal = opened.startTerminal;
+  assert.equal(
+    terminal.ready,
+    true,
+    'startTerminal did not wait for the shell.',
+  );
+  // Home terminals: the first creates the phone workspace, the second reuses it.
+  const homeQuery = 'mutation{startTerminal{paneId tabId workspaceId ready}}';
+  type Started = {
+    startTerminal: {
+      paneId: string;
+      tabId: string;
+      workspaceId: string;
+      ready: boolean;
+    };
+  };
+  const firstHome = (await execute<Started>(homeQuery)).startTerminal;
+  const secondHome = (await execute<Started>(homeQuery)).startTerminal;
+  assert.equal(secondHome.workspaceId, firstHome.workspaceId);
+  assert.notEqual(secondHome.tabId, firstHome.tabId);
+  const layout = await execute<{
+    homeFolder: string;
+    session: {
+      workspaces: { id: string; label: string }[];
+      tabs: { id: string; label: string }[];
+      panes: { id: string; cwd: string | null }[];
+    };
+  }>(
+    '{ homeFolder session { workspaces { id label } tabs { id label } panes { id cwd } } }',
+  );
+  assert.equal(layout.homeFolder, fakeHome);
+  assert.equal(
+    layout.session.workspaces.filter((w) => w.label === 'phone').length,
+    1,
+  );
+  assert.equal(
+    layout.session.workspaces.find((w) => w.id === firstHome.workspaceId)
+      ?.label,
+    'phone',
+  );
+  assert.equal(
+    layout.session.tabs.find((t) => t.id === terminal.tabId)?.label,
+    'terminal',
+  );
+  const cwdOf = (id: string) =>
+    layout.session.panes.find((p) => p.id === id)?.cwd;
+  assert.equal(cwdOf(terminal.paneId), '/tmp');
+  assert.equal(cwdOf(firstHome.paneId), fakeHome);
+  assert.equal(cwdOf(secondHome.paneId), fakeHome);
+  // Run a harmless marker in the new shell the way the app's Run does.
+  await execute(
+    'mutation($id:ID!,$text:String!){sendText(paneId:$id,text:$text){ok}}',
+    { id: terminal.paneId, text: "printf '%s\\n' 'HERDR_'TERMINAL_OK" },
+  );
+  await execute(
+    'mutation($id:ID!){sendKeys(target:$id,keys:["enter"],raw:true){ok}}',
+    { id: terminal.paneId },
+  );
+  assert(
+    await waitFor(terminal.paneId, (text) =>
+      text.split('\n').some((line) => line.trim() === 'HERDR_TERMINAL_OK'),
+    ),
+    'The new terminal did not run the command.',
+  );
   console.log(
-    `Live integration passed against Herdr ${session.session.version}: authenticated snapshot → literal terminal text → Enter → captured output; new session tab → agent start → first task.`,
+    `Live integration passed against Herdr ${session.session.version}: authenticated snapshot → literal terminal text → Enter → captured output; new session tab → agent start → first task; terminal tab → command; home workspace → reused.`,
   );
 } finally {
   if (client) await client.request('server.stop').catch(() => {});
   // This process belongs only to the unique test session created above.
   if (server.exitCode === null) server.kill('SIGTERM');
   rmSync(fakeBin, { recursive: true, force: true });
+  rmSync(fakeHome, { recursive: true, force: true });
 }

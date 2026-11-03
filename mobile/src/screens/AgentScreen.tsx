@@ -23,6 +23,7 @@ import {
   type ComposerMode,
 } from '@/lib/terminal';
 import { clearHandoff, peekHandoff } from '@/lib/handoff';
+import { shortPath } from '@/lib/sessions';
 import { languageInfo } from '@/lib/dictation';
 import type { Output } from '@/lib/types';
 import {
@@ -248,8 +249,11 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
     pane?.label ??
     pane?.title ??
     agent?.kind ??
-    'Terminal';
-  const details = [agent?.kind ?? 'terminal', agent?.cwd ?? pane?.cwd]
+    'terminal';
+  const details = [
+    agent?.kind ?? 'terminal',
+    shortPath(agent?.cwd ?? pane?.cwd),
+  ]
     .filter(Boolean)
     .join(' · ');
   const blocked = hasAgent && agent?.status === 'blocked';
@@ -257,12 +261,12 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
   const lineCount = shown ? shown.split('\n').length : 0;
   const jumpLabel =
     frozen === null || frozen === latest
-      ? 'Latest'
+      ? 'latest'
       : pending === null
-        ? 'New output'
+        ? 'new output'
         : pending > 0
           ? `${pending} new line${pending === 1 ? '' : 's'}`
-          : 'Latest';
+          : 'latest';
 
   return (
     <Screen>
@@ -290,10 +294,12 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
               {name}
             </Text>
             <View style={[s.row, { gap: 6 }]}>
-              <Status
-                status={agent?.status ?? pane?.status ?? 'unknown'}
-                pulse
-              />
+              {hasAgent ? (
+                <Status status={agent.status} pulse />
+              ) : (
+                // A plain shell has no agent status to show.
+                <Text style={[s.muted, { color: c.accent }]}>$</Text>
+              )}
               <Text
                 numberOfLines={1}
                 style={[

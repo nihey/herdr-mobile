@@ -211,7 +211,7 @@ export function MachinesScreen() {
                   <Text
                     style={{ color: c.accent, fontFamily: mono, fontSize: 12 }}
                   >
-                    Current machine
+                    current machine
                   </Text>
                 </View>
               ) : (

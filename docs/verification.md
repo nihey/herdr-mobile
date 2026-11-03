@@ -1,5 +1,13 @@
 # Verification — October 15, 2026
 
+## Version 0.5.0: plain terminals and the Herdr look — November 3, 2026
+
+- Lint, TypeScript and 104 tests pass (bridge: startTerminal in a project, home workspace created then reused by label whatever its panes' folders, home agent sessions, not-ready shells, unknown projects; app: status marks, composer modes and Run failure notice, project list and old-bridge detection, and a palette guard that rejects color literals outside the theme).
+- `npm run integration` against Herdr 0.9.4 in a disposable named server (`/bin/sh`, restricted PATH, temporary home folder): previous checks, plus a terminal tab labelled `terminal` in the workspace folder running a `printf` marker, and two home terminals sharing one `phone` workspace in the temporary home.
+- Release APK 0.5.0 (code 5) on a read-only, headless emulator set to 1080×2400 at 420 dpi (the usual test emulator was in use by another session), paired with a test bridge on a disposable session whose PATH held only stand-in agents (verified with `command -v` first) and a fake home folder. Checked: launch is a plain `#171421` screen for about 0.8 s with no logo or fade; first-machine pairing keeps the token field and connect above the keyboard at font scale 1.0 and 1.3; home, machines and the New sheet follow mockup B; long labels and paths truncate on one line at font scale 1.3; New → Home folder → terminal with first command `echo ok-from-phone` ran it; Run executed `echo ran-42` while Type left text at the prompt; the key row is one sideways-scrolling line; running the stand-in `claude` by hand switched the screen to Prompt; a second home terminal reused the single `phone` workspace, which the project list hides.
+- Against the 0.4.0 bridge build: projects still load and agent sessions in a project are allowed; Home folder and terminal show the update message with the button disabled.
+- Not checked on a physical phone.
+
 ## Version 0.4.0: new sessions and home UX — November 2, 2026
 
 - Lint, TypeScript and 86 tests pass (bridge startSession: project folder, unfocused labelled tab, shell wait, readiness, blocked/exited/missing agents, duplicate names, optional checks; app helpers for kinds, names, ordering, titles and draft handoff).

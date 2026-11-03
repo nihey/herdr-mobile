@@ -36,11 +36,13 @@
 ### Task 1: Bridge: terminals and the home workspace
 
 **Files:**
+
 - Modify: `bridge/src/schema.ts`, `bridge/src/server.ts`
 - Test: `bridge/src/server.test.ts`
 - Docs: `bridge/AGENTS.md`
 
 **Interfaces:**
+
 - Produces (GraphQL):
   - `Query.homeFolder: String` — the bridge user's home directory.
   - `Mutation.startTerminal(workspaceId: ID): StartedTerminal!`, `type StartedTerminal { paneId: ID! tabId: ID! workspaceId: ID! ready: Boolean! }`.
@@ -62,45 +64,90 @@ it('reports the home folder', async () => {
 });
 it('opens a plain terminal in a new unfocused tab in the project folder', async () => {
   const { query, calls } = sessionSetup();
-  const { body } = await query('mutation { startTerminal(workspaceId:"w1") { paneId tabId workspaceId ready } }');
-  expect(body.data.startTerminal).toEqual({ paneId: 'w1:p9', tabId: 'w1:t9', workspaceId: 'w1', ready: true });
-  expect(calls.map((c) => c.method)).toEqual(['session.snapshot', 'tab.create', 'pane.process_info']);
-  expect(calls[1].params).toEqual({ workspace_id: 'w1', label: 'terminal', focus: false, cwd: '/work/api' });
-  expect(calls.some((c) => /agent\.|send_text|send_keys/.test(c.method))).toBe(false);
+  const { body } = await query(
+    'mutation { startTerminal(workspaceId:"w1") { paneId tabId workspaceId ready } }',
+  );
+  expect(body.data.startTerminal).toEqual({
+    paneId: 'w1:p9',
+    tabId: 'w1:t9',
+    workspaceId: 'w1',
+    ready: true,
+  });
+  expect(calls.map((c) => c.method)).toEqual([
+    'session.snapshot',
+    'tab.create',
+    'pane.process_info',
+  ]);
+  expect(calls[1].params).toEqual({
+    workspace_id: 'w1',
+    label: 'terminal',
+    focus: false,
+    cwd: '/work/api',
+  });
+  expect(calls.some((c) => /agent\.|send_text|send_keys/.test(c.method))).toBe(
+    false,
+  );
 });
 it('creates the phone workspace in the home folder for the first home terminal', async () => {
   const { query, calls } = sessionSetup();
-  const { body } = await query('mutation { startTerminal { paneId tabId workspaceId ready } }');
-  expect(body.data.startTerminal).toEqual({ paneId: 'w8:p1', tabId: 'w8:t1', workspaceId: 'w8', ready: true });
-  expect(calls.find((c) => c.method === 'workspace.create')?.params).toEqual({ label: 'phone', cwd: '/home/tester', focus: false });
+  const { body } = await query(
+    'mutation { startTerminal { paneId tabId workspaceId ready } }',
+  );
+  expect(body.data.startTerminal).toEqual({
+    paneId: 'w8:p1',
+    tabId: 'w8:t1',
+    workspaceId: 'w8',
+    ready: true,
+  });
+  expect(calls.find((c) => c.method === 'workspace.create')?.params).toEqual({
+    label: 'phone',
+    cwd: '/home/tester',
+    focus: false,
+  });
   expect(calls.some((c) => c.method === 'tab.create')).toBe(false);
 });
-it('reuses the phone workspace whatever its panes\' folders', async () => {
+it("reuses the phone workspace whatever its panes' folders", async () => {
   const { query, calls } = sessionSetup({ homeWorkspace: true });
   const { body } = await query('mutation { startTerminal { workspaceId } }');
   expect(body.data.startTerminal.workspaceId).toBe('w7');
   expect(calls.some((c) => c.method === 'workspace.create')).toBe(false);
-  expect(calls.find((c) => c.method === 'tab.create')?.params).toEqual({ workspace_id: 'w7', label: 'terminal', focus: false, cwd: '/home/tester' });
+  expect(calls.find((c) => c.method === 'tab.create')?.params).toEqual({
+    workspace_id: 'w7',
+    label: 'terminal',
+    focus: false,
+    cwd: '/home/tester',
+  });
 });
 it('starts an agent session in the home workspace when no project is given', async () => {
   const { query, calls } = sessionSetup({ homeWorkspace: true });
-  const { body } = await query('mutation { startSession(kind:"claude", name:"claude-9") { workspaceId ready } }');
+  const { body } = await query(
+    'mutation { startSession(kind:"claude", name:"claude-9") { workspaceId ready } }',
+  );
   expect(body.data.startSession).toEqual({ workspaceId: 'w7', ready: true });
-  expect(calls.find((c) => c.method === 'tab.create')?.params).toMatchObject({ workspace_id: 'w7', cwd: '/home/tester' });
+  expect(calls.find((c) => c.method === 'tab.create')?.params).toMatchObject({
+    workspace_id: 'w7',
+    cwd: '/home/tester',
+  });
 });
 it('reports a terminal whose shell is still busy as not ready', async () => {
   const { query } = sessionSetup({ shellBusyPolls: 100000 });
-  const { body } = await query('mutation { startTerminal(workspaceId:"w1") { ready } }');
+  const { body } = await query(
+    'mutation { startTerminal(workspaceId:"w1") { ready } }',
+  );
   expect(body.data.startTerminal.ready).toBe(false);
 });
 it('reports not ready when the shell cannot be checked', async () => {
   const { query } = sessionSetup({ processInfoFails: true });
-  const { body } = await query('mutation { startTerminal(workspaceId:"w1") { ready } }');
+  const { body } = await query(
+    'mutation { startTerminal(workspaceId:"w1") { ready } }',
+  );
   expect(body.data.startTerminal.ready).toBe(false);
 });
 it('rejects an unknown project before opening a terminal', async () => {
   const { query, calls } = sessionSetup();
-  const { body } = await query('mutation { startTerminal(workspaceId:"w404") { paneId } }');
+  const { body } = await query(
+    'mutation { startTerminal(workspaceId:"w404") { paneId } }',
+  );
   expect(body.errors[0].extensions.code).toBe('BAD_USER_INPUT');
   expect(calls.some((c) => c.method === 'tab.create')).toBe(false);
 });
@@ -135,10 +182,12 @@ Expected: all PASS, including every pre-existing `startSession` test.
 ### Task 2: App foundation: palette, font, status marks, launch screen
 
 **Files:**
+
 - Create: `mobile/src/lib/status.ts`, `mobile/src/lib/status.test.ts`, `mobile/assets/fonts/NotoSansMono-Regular.ttf`, `mobile/assets/fonts/NotoSansMono-Bold.ttf`, `mobile/assets/fonts/OFL.txt`, `mobile/assets/splash-blank.png`
 - Modify: `mobile/app.json`, `mobile/package.json` (via `npx expo install expo-splash-screen`), `mobile/src/components/ui.tsx`, `mobile/src/app/_layout.tsx`
 
 **Interfaces:**
+
 - Produces: `c` tokens in `ui.tsx`: `bg '#171421'`, `panel '#1E1E2E'`, `line '#313244'`, `elevated '#313244'`, `text '#CDD6F4'`, `muted '#A6ADC8'`, `dim '#6C7086'`, `accent '#89B4FA'`, `ink '#171421'` (text on accent), `amber '#F9E2AF'` (working), `red '#F38BA8'` (needs input, danger), `green '#A6E3A1'` (done), `term '#D0CFCC'` (terminal text), `select 'rgba(137,180,250,0.14)'`, `scrim '#00000099'`.
 - Produces: `mono` = the bundled Noto Sans Mono family name (bold via `fontWeight: '700'`), `s.*` styles all carrying `fontFamily: mono`.
 - Produces: `statusMark(status: string): { glyph: '●' | '◐' | '✓' | '○' | '·'; tone: 'red' | 'amber' | 'green' | 'dim'; label: string }` in `mobile/src/lib/status.ts` (`label`: "needs input", "working", "done", "idle", or the raw status).
@@ -176,9 +225,11 @@ it.each([
 ### Task 3: Screens in the B style (home, machines, connect, modals) and the pairing keyboard fix
 
 **Files:**
+
 - Modify: `mobile/src/screens/AgentsScreen.tsx`, `MachinesScreen.tsx`, `PairMachineModal.tsx`, `StartAgentModal.tsx`, `ConnectScreen.tsx`, `mobile/src/components/DictationControl.tsx`
 
 **Interfaces:**
+
 - Consumes: `c`, `mono`, `s`, `Status`, `statusMark` (Task 2).
 
 - [ ] **Step 1: Restyle to option B** (mockup `look.html`, right-hand phones):
@@ -193,6 +244,7 @@ it.each([
 ### Task 4: Terminal screen in the B style
 
 **Files:**
+
 - Create: `mobile/src/lib/palette.test.ts`
 - Modify: `mobile/src/screens/AgentScreen.tsx`
 
@@ -203,7 +255,9 @@ it.each([
 it('keeps colors in the theme', () => {
   for (const file of tsxFiles('mobile/src'))
     if (!file.endsWith('components/ui.tsx'))
-      expect(readFileSync(file, 'utf8')).not.toMatch(/['"]#[0-9A-Fa-f]{3,8}['"]/);
+      expect(readFileSync(file, 'utf8')).not.toMatch(
+        /['"]#[0-9A-Fa-f]{3,8}['"]/,
+      );
 });
 ```
 
@@ -217,10 +271,12 @@ it('keeps colors in the theme', () => {
 ### Task 5: Run/Type composer for plain terminals
 
 **Files:**
+
 - Modify: `mobile/src/lib/terminal.ts`, `mobile/src/screens/AgentScreen.tsx`
 - Test: `mobile/src/lib/terminal.test.ts` (create if absent; keep existing `newLineCount` tests where they are)
 
 **Interfaces:**
+
 - Produces in `terminal.ts`: `type ComposerMode = 'prompt' | 'run' | 'type'`; `effectiveMode(mode: ComposerMode, hasAgent: boolean): ComposerMode`; `nextMode(mode: ComposerMode, hasAgent: boolean): ComposerMode`; `runFailureNotice(typed: boolean): string`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -257,10 +313,12 @@ it('says a typed command was not run when Enter failed', () => {
 ### Task 6: New session sheet: Terminal and Home folder
 
 **Files:**
+
 - Modify: `mobile/src/lib/graphql.ts`, `mobile/src/lib/types.ts`, `mobile/src/lib/sessions.ts`, `mobile/src/screens/NewSessionSheet.tsx`
 - Test: `mobile/src/lib/sessions.test.ts`
 
 **Interfaces:**
+
 - Consumes: Task 1 GraphQL; Task 5 behavior of raw terminals.
 - Produces: `HOME_FOLDER` (`query HomeFolder { homeFolder }`) and `START_TERMINAL` (`mutation StartTerminal($workspaceId: ID) { startTerminal(workspaceId: $workspaceId) { paneId tabId workspaceId ready } }`); `START_SESSION` variable becomes `$workspaceId: ID`; `type StartedTerminal = { paneId: string; tabId: string; workspaceId: string; ready: boolean }`.
 - Produces in `sessions.ts`: `HOME_LABEL = 'phone'`; `HOME = '~home'` (sheet-only sentinel, never sent); `listedProjects(projects: Project[]): Project[]`; `terminalsSupported(error: unknown): boolean`.
@@ -269,11 +327,16 @@ it('says a typed command was not run when Enter failed', () => {
 
 ```ts
 it('hides the phone workspace from the project list', () => {
-  const projects = [{ id: 'w1', label: 'api', cwd: '/a' }, { id: 'w7', label: 'phone', cwd: '/h' }];
+  const projects = [
+    { id: 'w1', label: 'api', cwd: '/a' },
+    { id: 'w7', label: 'phone', cwd: '/h' },
+  ];
   expect(listedProjects(projects).map((p) => p.id)).toEqual(['w1']);
 });
 it('treats an old bridge as not supporting terminals', () => {
-  const old = new CombinedGraphQLErrors({ errors: [{ message: 'Cannot query field "homeFolder" on type "Query".' }] });
+  const old = new CombinedGraphQLErrors({
+    errors: [{ message: 'Cannot query field "homeFolder" on type "Query".' }],
+  });
   expect(terminalsSupported(old)).toBe(false);
   expect(terminalsSupported(null)).toBe(true);
 });
@@ -297,6 +360,7 @@ it('treats an old bridge as not supporting terminals', () => {
 ### Task 7: Live checks, docs, version, build
 
 **Files:**
+
 - Modify: `scripts/integration.ts`, `README.md`, `AGENTS.md`, `mobile/AGENTS.md`, `PRIVACY.md`, `docs/verification.md`, `docs/implementation-ledger.md`, `package.json`, `bridge/package.json`, `mobile/package.json`, `mobile/app.json`, `package-lock.json`
 
 - [ ] **Step 1: Integration test** — in the disposable session, after the existing checks: `startTerminal(workspaceId: <test workspace>)` → `ready === true`, tab label `terminal`, pane cwd `/tmp`; create a bridge with `homeDir` = a fresh `mkdtemp` folder and call `startTerminal` twice with no workspace → first creates a `phone` workspace (pane cwd = the temp home), second reuses the same `workspaceId` with a new tab. Type `printf '%s\n' 'HERDR_'TERMINAL_OK` + Enter into the first terminal and wait for `HERDR_TERMINAL_OK`. Remove the temp home in `finally`. Run `npm run integration`; expected: passes and prints the summary line extended with "terminal tab → home workspace".
