@@ -37,36 +37,45 @@ export class MachineStore {
     this.queue = result.catch(() => {});
     return result;
   }
-  private async read(): Promise<MachineState> {
+  /** The v2 index: undefined when absent, null when unreadable. */
+  private async readIndex() {
     const raw = await this.storage.getItemAsync(INDEX_KEY);
-    if (raw) {
-      let index: { version: number; ids: string[]; activeId: string | null };
-      try {
-        index = JSON.parse(raw);
-        if (
-          index.version !== 2 ||
-          !Array.isArray(index.ids) ||
-          index.ids.length > LIMIT ||
-          !index.ids.every(validId)
-        )
-          return empty();
-      } catch {
-        return empty();
-      }
+    if (!raw) return undefined;
+    try {
+      const index: { version: number; ids: string[]; activeId: string | null } =
+        JSON.parse(raw);
+      if (
+        index.version !== 2 ||
+        !Array.isArray(index.ids) ||
+        index.ids.length > LIMIT ||
+        !index.ids.every(validId)
+      )
+        return null;
+      return { ids: [...new Set(index.ids)], activeId: index.activeId };
+    } catch {
+      return null;
+    }
+  }
+  private async profile(id: string): Promise<Machine | null> {
+    const stored = await this.storage.getItemAsync(PROFILE_PREFIX + id);
+    if (!stored) return null;
+    try {
+      const value: Machine = JSON.parse(stored);
+      if (value.id !== id) return null;
+      return { id, ...settings(value.name, value.url, value.token) };
+    } catch {
+      /* Keep other valid profiles when one record is corrupt. */
+      return null;
+    }
+  }
+  private async read(): Promise<MachineState> {
+    const index = await this.readIndex();
+    if (index === null) return empty();
+    if (index) {
       const machines: Machine[] = [];
-      for (const id of [...new Set(index.ids)]) {
-        const stored = await this.storage.getItemAsync(PROFILE_PREFIX + id);
-        if (!stored) continue;
-        try {
-          const value: Machine = JSON.parse(stored);
-          if (value.id !== id) continue;
-          machines.push({
-            id,
-            ...settings(value.name, value.url, value.token),
-          });
-        } catch {
-          /* Keep other valid profiles when one record is corrupt. */
-        }
+      for (const id of index.ids) {
+        const machine = await this.profile(id);
+        if (machine) machines.push(machine);
       }
       return {
         machines,
@@ -151,6 +160,27 @@ export class MachineStore {
   }
   load() {
     return this.serialized(() => this.read());
+  }
+  /**
+   * The active machine, as load() would choose it, read without migrating or
+   * writing anything: the widget can run while the app changes machines. A
+   * v1-only connection reads as null until the app migrates it.
+   */
+  peek() {
+    return this.serialized(async () => {
+      const index = await this.readIndex();
+      if (!index) return null;
+      const { ids, activeId } = index;
+      const order =
+        activeId && ids.includes(activeId)
+          ? [activeId, ...ids.filter((id) => id !== activeId)]
+          : ids;
+      for (const id of order) {
+        const machine = await this.profile(id);
+        if (machine) return machine;
+      }
+      return null;
+    });
   }
   add(name: string, url: string, token: string) {
     return this.serialized(async () =>

@@ -17,6 +17,7 @@ import {
   type MachineSummary,
 } from './machines';
 import type { Session } from './types';
+import { refreshAgentWidget } from '@/widget/update';
 
 type Client = ReturnType<typeof createClient>;
 type Context = {
@@ -80,6 +81,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     },
     [client],
   );
+  // Redraw the home screen widget for a new active machine (or none). The
+  // first load is left to the home screen's poll.
+  const widgetMachine = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!ready) return;
+    if (
+      widgetMachine.current !== undefined &&
+      widgetMachine.current !== state.activeId
+    )
+      refreshAgentWidget();
+    widgetMachine.current = state.activeId;
+  }, [ready, state.activeId]);
 
   async function change(operation: () => Promise<MachineState>) {
     if (writing.current)

@@ -1,7 +1,8 @@
 import { ApolloClient, InMemoryCache, HttpLink, gql } from '@apollo/client';
 import type { Connection } from './connection';
 
-export function createClient(connection: Connection) {
+/** `timeout` bounds each request; the widget's task must end within 30 s. */
+export function createClient(connection: Connection, timeout = 45000) {
   return new ApolloClient({
     cache: new InMemoryCache(),
     link: new HttpLink({
@@ -9,7 +10,7 @@ export function createClient(connection: Connection) {
       headers: { authorization: `Bearer ${connection.token}` },
       fetch: async (uri, options) => {
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 45000);
+        const timer = setTimeout(() => controller.abort(), timeout);
         const externalSignal = options?.signal;
         const abort = () => controller.abort();
         if (externalSignal?.aborted) controller.abort();
@@ -62,6 +63,25 @@ export const SESSION = gql`
         title
         cwd
         kind
+        status
+      }
+    }
+  }
+`;
+// The home screen widget: only the fields it draws. Valid on a 0.4.0 bridge.
+export const WIDGET_AGENTS = gql`
+  query WidgetAgents {
+    session {
+      workspaces {
+        id
+        label
+      }
+      agents {
+        paneId
+        workspaceId
+        name
+        kind
+        title
         status
       }
     }

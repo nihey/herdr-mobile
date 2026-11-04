@@ -160,3 +160,55 @@ describe('saved machine profiles', () => {
     expect((await store.load()).activeId).toBe(state.activeId);
   });
 });
+describe('reading the active machine for the widget', () => {
+  function readOnly(data: Map<string, string>) {
+    const writes: string[] = [];
+    const store = new MachineStore({
+      getItemAsync: async (key) => data.get(key) ?? null,
+      setItemAsync: async (key) => {
+        writes.push(key);
+      },
+      deleteItemAsync: async (key) => {
+        writes.push(key);
+      },
+    });
+    return { store, writes };
+  }
+  it('returns the active profile without writing', async () => {
+    const { store, data } = setup();
+    await store.add('Desktop', 'http://100.64.0.1:8787', 'first-token');
+    const two = await store.add('Laptop', 'http://100.64.0.2:8787', 'second');
+    await store.activate(two.machines[0]!.id);
+    const peek = readOnly(data);
+    expect(await peek.store.peek()).toMatchObject({
+      name: 'Desktop',
+      url: 'http://100.64.0.1:8787',
+      token: 'first-token',
+    });
+    expect(peek.writes).toEqual([]);
+  });
+  it('falls back to the first readable profile, like load()', async () => {
+    const { store, data } = setup();
+    const one = await store.add('Desktop', 'http://100.64.0.1:8787', 'a');
+    await store.add('Laptop', 'http://100.64.0.2:8787', 'b');
+    const active = (await store.load()).activeId!;
+    data.set(`herdr.machine.${active}`, '{broken');
+    const peeked = await readOnly(data).store.peek();
+    expect(peeked?.id).toBe(one.activeId);
+    expect(peeked?.id).toBe((await store.load()).activeId);
+  });
+  it('never migrates a v1 connection or reads a broken index', async () => {
+    const data = new Map([
+      [
+        LEGACY_KEY,
+        JSON.stringify({ url: 'http://100.64.0.1:8787', token: 'old' }),
+      ],
+    ]);
+    const peek = readOnly(data);
+    expect(await peek.store.peek()).toBeNull();
+    expect(peek.writes).toEqual([]);
+    data.set(INDEX_KEY, '{"version":3}');
+    expect(await peek.store.peek()).toBeNull();
+    expect(await readOnly(new Map()).store.peek()).toBeNull();
+  });
+});
