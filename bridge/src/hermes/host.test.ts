@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { hostEnv, spawnHost, type HermesHost } from './host.js';
 import type { HostIn, HostOut, ToolSpec } from './protocol.js';
 import { startFakeModel, type FakeModel, type FakeStep } from './fake-model.js';
@@ -17,6 +17,45 @@ const tools: ToolSpec[] = [
   description: `${name} test tool`,
   parameters: { type: 'object', properties: {}, required: [] },
 }));
+
+// Newer Hermes installs its dependencies once per data root (a minute or
+// more), so every test shares one warmed-up HERMES_HOME; sessions keep them
+// apart.
+const sharedHome = existsSync(python)
+  ? mkdtempSync(join(tmpdir(), 'herd-hermes-'))
+  : '';
+let warming: Promise<void> | undefined;
+function warmUp() {
+  warming ??= new Promise<void>((resolve, reject) => {
+    const host = spawnHost({
+      python,
+      env: { ...process.env, HERMES_HOME: sharedHome },
+    });
+    host.onMessage((message) => {
+      if (message.type === 'ready' || message.type === 'fatal') {
+        host.stop();
+        if (message.type === 'ready') resolve();
+        else reject(new Error(message.message));
+      }
+    });
+    host.send({
+      type: 'start',
+      sessionId: null,
+      model: 'fake-model',
+      provider: 'custom',
+      baseUrl: 'http://127.0.0.1:9/v1',
+      apiKey: 'dummy',
+      reasoningEffort: 'medium',
+      instructions: 'warm up',
+      tools,
+      probe: false,
+    });
+  });
+  return warming;
+}
+afterAll(() => {
+  if (sharedHome) rmSync(sharedHome, { recursive: true, force: true });
+});
 
 /** Drives a real host process and waits for its messages in order. */
 class Driver {
@@ -58,7 +97,7 @@ afterEach(async () => {
 
 async function setup(steps: FakeStep[], home?: string) {
   const model: FakeModel = await startFakeModel(steps);
-  const hermesHome = home ?? mkdtempSync(join(tmpdir(), 'herd-hermes-'));
+  const hermesHome = home ?? sharedHome;
   const host = spawnHost({
     python,
     env: { ...process.env, HERMES_HOME: hermesHome },
@@ -67,7 +106,6 @@ async function setup(steps: FakeStep[], home?: string) {
     () => host.stop(),
     () => model.close(),
   );
-  if (!home) cleanup.push(() => rmSync(hermesHome, { recursive: true }));
   const driver = new Driver(host);
   const start = (sessionId: string | null = null, probe = false) =>
     driver.send({
@@ -86,6 +124,7 @@ async function setup(steps: FakeStep[], home?: string) {
 }
 
 describe.skipIf(!existsSync(python))('Hermes host', () => {
+  beforeAll(warmUp, 600000);
   it('reports exactly the four coordinator tools', async () => {
     const { driver, start } = await setup([]);
     start();
@@ -144,8 +183,7 @@ describe.skipIf(!existsSync(python))('Hermes host', () => {
   }, 30000);
 
   it("reloads a session's history", async () => {
-    const home = mkdtempSync(join(tmpdir(), 'herd-hermes-'));
-    cleanup.push(() => rmSync(home, { recursive: true }));
+    const home = sharedHome;
     const first = await setup(
       [{ tool: 'read_agent', args: { agent_id: 'w1:p1' } }, { text: 'busy' }],
       home,
@@ -227,6 +265,7 @@ const notFound = {
 };
 
 describe.skipIf(!existsSync(python))('Hermes host: unfinished requests', () => {
+  beforeAll(warmUp, 600000);
   it('closes a failed request so the next message is not merged with it', async () => {
     const { driver, start, model } = await setup([notFound, { text: 'fine' }]);
     start();
@@ -252,8 +291,7 @@ describe.skipIf(!existsSync(python))('Hermes host: unfinished requests', () => {
   }, 30000);
 
   it('closes a turn cut off by a restart', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'herd-hermes-'));
-    cleanup.push(() => rmSync(home, { recursive: true }));
+    const home = sharedHome;
     const first = await setup(
       [
         {
@@ -297,8 +335,7 @@ describe.skipIf(!existsSync(python))('Hermes host: unfinished requests', () => {
   }, 30000);
 
   it("records the bridge's answer for a call in flight when stopped", async () => {
-    const home = mkdtempSync(join(tmpdir(), 'herd-hermes-'));
-    cleanup.push(() => rmSync(home, { recursive: true }));
+    const home = sharedHome;
     const first = await setup(
       [
         { tool: 'send_to_agent', args: { agent_id: 'w1:p1', message: 'hi' } },
@@ -339,8 +376,7 @@ describe.skipIf(!existsSync(python))('Hermes host: unfinished requests', () => {
   }, 30000);
 
   it('keeps reloaded tool results small', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'herd-hermes-'));
-    cleanup.push(() => rmSync(home, { recursive: true }));
+    const home = sharedHome;
     const first = await setup(
       [{ tool: 'read_agent', args: { agent_id: 'w1:p1' } }, { text: 'busy' }],
       home,

@@ -19,7 +19,7 @@ Android app → Tailscale → GraphQL bridge :8787 → Herdr Unix socket
 - Node.js 22.13+ and npm.
 - A running Herdr server (developed against 0.9.4, public JSON API/protocol 22).
 - Tailscale on your computer and phone, joined to the same tailnet. Your tailnet ACL must allow the phone to reach the computer on TCP 8787.
-- Optional, for the Hermes chat: [Hermes Agent](https://github.com/NousResearch/hermes-agent) installed on the computer (developed against 0.21.0, default location `~/.hermes/hermes-agent`), signed in to a model provider (by default OpenAI through `hermes login` with Codex).
+- Optional, for the Hermes chat: [Hermes Agent](https://github.com/NousResearch/hermes-agent) installed on the computer (tested with 0.21.0 and the 2026.9.24 git build `b200f5b`, default location `~/.hermes/hermes-agent`), signed in to a model provider (by default OpenAI through `hermes login` with Codex).
 - Android 7+; local builds need a full JDK 17+ (including `javac`) and the Android SDK. The build script discovers the installed Android Studio JDK when the system Java has no compiler. Set `JAVA_HOME` to override it.
 
 ## Start the bridge
