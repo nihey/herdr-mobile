@@ -8,6 +8,7 @@ import { loadConfig } from './config.js';
 import { createBridge } from './server.js';
 import { HerdrClient } from './socket.js';
 import { createDiscovery } from './discovery.js';
+import { createHerdrStarter, createLaunch } from './launch.js';
 import {
   COORDINATOR_INSTRUCTIONS,
   createCoordinator,
@@ -48,6 +49,15 @@ if (process.argv.includes('--pairing')) {
     request,
     discover: createDiscovery(),
     hermes,
+    // Only after the socket refused the connection (e.g. Herdr crashed).
+    startHerdr: createHerdrStarter({
+      ping: () => client.request('ping', {}, 2000),
+      launch: createLaunch({
+        socketPath: config.socketPath,
+        homeDir: homedir(),
+        env: process.env,
+      }),
+    }),
   });
   const server = createServer(
     { maxHeaderSize: 8192, requestTimeout: 15000, headersTimeout: 10000 },

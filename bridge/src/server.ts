@@ -4,6 +4,7 @@ import { createYoga, type Plugin } from 'graphql-yoga';
 import { buildSchema, type RequestHerdr, type StartTiming } from './schema.js';
 import type { DiscoveredMachine } from './discovery.js';
 import type { Coordinator } from './hermes/coordinator.js';
+import type { StartHerdr } from './launch.js';
 
 const MAX_BODY_BYTES = 128 * 1024;
 function authenticated(header: string | null, token: string) {
@@ -25,6 +26,8 @@ export function createBridge(options: {
   homeDir?: string;
   /** The Hermes coordinator; without one, Hermes reports itself as not set up. */
   hermes?: Coordinator;
+  /** Starts Herdr when it is not running; without one, startHerdr is refused. */
+  startHerdr?: StartHerdr;
 }) {
   if (options.token.length < 32)
     throw new Error('Bridge token must contain at least 32 characters.');
@@ -57,6 +60,7 @@ export function createBridge(options: {
       options.startTiming,
       options.homeDir,
       options.hermes,
+      options.startHerdr,
     ),
     graphqlEndpoint: '/graphql',
     graphiql: false,

@@ -4,6 +4,7 @@ import { createSchema } from 'graphql-yoga';
 import { HerdrError } from './socket.js';
 import type { DiscoveredMachine } from './discovery.js';
 import { CoordinatorError, type Coordinator } from './hermes/coordinator.js';
+import type { StartHerdr } from './launch.js';
 import {
   createActions,
   defaultStartTiming,
@@ -48,6 +49,7 @@ export function buildSchema(
   timing: StartTiming = defaultStartTiming,
   homeDir: string = homedir(),
   hermes?: Coordinator,
+  startHerdr?: StartHerdr,
 ) {
   const actions = createActions(request, timing, homeDir);
   const hermesError = (error: unknown) =>
@@ -107,6 +109,10 @@ export function buildSchema(
       }
       type ActionResult {
         ok: Boolean!
+      }
+      type HerdrStart {
+        "False when Herdr was already running, so nothing was started."
+        started: Boolean!
       }
       type StartedSession {
         paneId: ID!
@@ -189,6 +195,8 @@ export function buildSchema(
         ): Output!
       }
       type Mutation {
+        "Starts the Herdr server when it is not running, e.g. after a crash. Never stops or restarts it."
+        startHerdr: HerdrStart!
         prompt(target: ID!, text: String!): ActionResult!
         sendKeys(
           target: ID!
@@ -281,6 +289,24 @@ export function buildSchema(
         }),
       },
       Mutation: {
+        startHerdr: async () => {
+          if (!startHerdr)
+            throw new GraphQLError(
+              'This bridge cannot start Herdr. Start it on the computer.',
+              { extensions: { code: 'herdr_start_unsupported' } },
+            );
+          try {
+            return await startHerdr();
+          } catch (error) {
+            if (error instanceof HerdrError)
+              throw new GraphQLError(error.message, {
+                extensions: { code: error.code },
+              });
+            throw new GraphQLError('The bridge could not start Herdr.', {
+              extensions: { code: 'BRIDGE_ERROR' },
+            });
+          }
+        },
         prompt: async (_: unknown, args: { target: string; text: string }) => {
           await actions.prompt(args.target, args.text);
           return { ok: true };

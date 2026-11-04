@@ -26,6 +26,7 @@ const needsNewer = [
   'HERMES_SEND',
   'HERMES_STOP',
   'HERMES_NEW',
+  'START_HERDR',
 ];
 
 const documents = Object.entries(operations).filter(

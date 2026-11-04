@@ -10,6 +10,18 @@ export class HerdrError extends Error {
   }
 }
 
+/**
+ * A connection failure's code. `not_running` only when the socket is missing
+ * or refused before connecting (Herdr exited or crashed): the one case where
+ * starting Herdr is safe. Anything else (a full queue of a frozen Herdr,
+ * permissions, a reset) stays `unavailable`.
+ */
+export function connectFailureCode(errno: string | undefined, sent: boolean) {
+  return !sent && (errno === 'ENOENT' || errno === 'ECONNREFUSED')
+    ? 'not_running'
+    : 'unavailable';
+}
+
 export class HerdrClient {
   constructor(
     private readonly path: string,
@@ -72,9 +84,9 @@ export class HerdrClient {
         sent = true;
         socket.write(payload);
       });
-      socket.on('error', () =>
+      socket.on('error', (error: NodeJS.ErrnoException) =>
         transportFailure(
-          'unavailable',
+          connectFailureCode(error.code, sent),
           'Cannot connect to Herdr. Check that its server is running and the socket path is correct.',
         ),
       );
