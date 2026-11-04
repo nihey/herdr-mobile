@@ -1,9 +1,9 @@
 import { createServer, type Socket } from 'node:net';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { HerdrClient } from './socket.js';
+import { connectFailureCode, HerdrClient } from './socket.js';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -106,5 +106,34 @@ describe('Herdr socket transport', () => {
     await expect(
       new HerdrClient(path, { maxBytes: 128 }).request('ping'),
     ).rejects.toMatchObject({ code: 'response_too_large' });
+  });
+  it('reports a missing socket as Herdr not running', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'herdr-test-'));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    await expect(
+      new HerdrClient(join(dir, 'herdr.sock')).request('ping'),
+    ).rejects.toMatchObject({ code: 'not_running' });
+  });
+  it('reports a socket nobody listens on (left by a crash) as not running', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'herdr-test-'));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    // Connecting to a path that is not a listening socket is refused.
+    const path = join(dir, 'herdr.sock');
+    await writeFile(path, '');
+    await expect(new HerdrClient(path).request('ping')).rejects.toMatchObject({
+      code: 'not_running',
+    });
+  });
+});
+
+describe('connection failure codes', () => {
+  it('is not_running only when the socket is missing or refused before connecting', () => {
+    expect(connectFailureCode('ENOENT', false)).toBe('not_running');
+    expect(connectFailureCode('ECONNREFUSED', false)).toBe('not_running');
+  });
+  it('keeps every other failure unavailable, e.g. a full queue of a frozen Herdr', () => {
+    for (const errno of ['EAGAIN', 'EACCES', 'ECONNRESET', 'EPIPE', undefined])
+      expect(connectFailureCode(errno, false)).toBe('unavailable');
+    expect(connectFailureCode('ECONNREFUSED', true)).toBe('unavailable');
   });
 });

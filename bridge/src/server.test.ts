@@ -1030,3 +1030,89 @@ describe('Hermes over GraphQL', () => {
     ]);
   });
 });
+
+describe('starting Herdr', () => {
+  const ask = (app: ReturnType<typeof createBridge>, authorized = true) =>
+    app(
+      new Request('http://localhost/graphql', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(authorized ? { authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ query: 'mutation { startHerdr { started } }' }),
+      }),
+    );
+  it('starts Herdr only for an authenticated request', async () => {
+    let starts = 0;
+    const app = createBridge({
+      token,
+      request: async () => {
+        throw new Error('No Herdr access expected');
+      },
+      startHerdr: async () => {
+        starts++;
+        return { started: true };
+      },
+    });
+    expect((await ask(app, false)).status).toBe(401);
+    expect(starts).toBe(0);
+    const body = await (await ask(app)).json();
+    expect(body.data.startHerdr).toEqual({ started: true });
+    expect(starts).toBe(1);
+  });
+  it('keeps the start failure code and message', async () => {
+    const app = createBridge({
+      token,
+      request: async () => ({}),
+      startHerdr: async () => {
+        throw new HerdrError(
+          'herdr_not_responding',
+          'Herdr is running but not responding.',
+        );
+      },
+    });
+    const body = await (await ask(app)).json();
+    expect(body.errors[0]).toMatchObject({
+      message: 'Herdr is running but not responding.',
+      extensions: { code: 'herdr_not_responding' },
+    });
+  });
+  it('hides unexpected failures', async () => {
+    const app = createBridge({
+      token,
+      request: async () => ({}),
+      startHerdr: async () => {
+        throw new Error('sensitive detail');
+      },
+    });
+    const body = await (await ask(app)).json();
+    expect(body.errors[0].extensions.code).toBe('BRIDGE_ERROR');
+    expect(JSON.stringify(body)).not.toContain('sensitive detail');
+  });
+  it('reports a stopped Herdr as not_running, which the app offers to start', async () => {
+    const app = createBridge({
+      token,
+      request: async () => {
+        throw new HerdrError('not_running', 'Cannot connect to Herdr.');
+      },
+    });
+    const response = await app(
+      new Request('http://localhost/graphql', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ query: '{ session { version } }' }),
+      }),
+    );
+    const body = await response.json();
+    expect(body.errors[0].extensions.code).toBe('not_running');
+  });
+  it('says so when this bridge cannot start Herdr', async () => {
+    const app = createBridge({ token, request: async () => ({}) });
+    const body = await (await ask(app)).json();
+    expect(body.errors[0].extensions.code).toBe('herdr_start_unsupported');
+  });
+});

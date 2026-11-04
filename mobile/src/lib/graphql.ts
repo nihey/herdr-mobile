@@ -255,3 +255,12 @@ export const HERMES_NEW = gql`
     }
   }
 `;
+
+// Needs a bridge newer than 0.7.0; an older one answers "Cannot query field".
+export const START_HERDR = gql`
+  mutation StartHerdr {
+    startHerdr {
+      started
+    }
+  }
+`;

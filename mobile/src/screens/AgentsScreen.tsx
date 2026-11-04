@@ -21,6 +21,7 @@ import { useSession } from '@/lib/session-context';
 import { useSnapshot } from '@/hooks/useSnapshot';
 import type { Pane } from '@/lib/types';
 import { errorMessage } from '@/lib/errors';
+import { herdrCardVisible } from '@/lib/herdr';
 import { attentionOrder, cleanTitle, shortPath } from '@/lib/sessions';
 import { statusMark } from '@/lib/status';
 import {
@@ -42,6 +43,7 @@ import {
 import { StartAgentModal } from './StartAgentModal';
 import { NewSessionSheet } from './NewSessionSheet';
 import { HermesRow } from './HermesRow';
+import { HerdrDown, useHerdrStart } from './HerdrDown';
 import { pinAgentWidget } from '@/widget/update';
 
 type StatusFilter = 'working' | 'blocked' | null;
@@ -49,6 +51,7 @@ type StatusFilter = 'working' | 'blocked' | null;
 export function AgentsScreen() {
   const { connection, activeMachine, forget, busy } = useSession();
   const { data, error, loading, refreshing, refresh, pull } = useSnapshot();
+  const herdr = useHerdrStart(error, refresh);
   const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
   const [workspace, setWorkspace] = useState<string | null>(null);
@@ -229,7 +232,11 @@ export function AgentsScreen() {
             })}
           </View>
         )}
-        {!!error && <Notice message={errorMessage(error)} danger />}
+        {herdrCardVisible(error, herdr.starting, herdr.message) ? (
+          <HerdrDown {...herdr} />
+        ) : (
+          !!error && <Notice message={errorMessage(error)} danger />
+        )}
         <View style={{ position: 'relative' }}>
           <Field
             placeholder="find an agent or folder"
