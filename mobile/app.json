@@ -24,7 +24,8 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "android.permission.FOREGROUND_SERVICE"
       ],
       "predictiveBackGestureEnabled": false
     },
@@ -78,6 +79,29 @@
               }
             ]
           }
+        }
+      ],
+      [
+        "react-native-android-widget",
+        {
+          "fonts": [
+            "./assets/fonts/NotoSansMono-Regular.ttf",
+            "./assets/fonts/NotoSansMono-Bold.ttf"
+          ],
+          "widgets": [
+            {
+              "name": "AgentStatus",
+              "label": "Herd Remote agents",
+              "description": "Agents on your active computer: needing input, working and idle.",
+              "minWidth": "110dp",
+              "minHeight": "40dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 2,
+              "resizeMode": "horizontal|vertical",
+              "updatePeriodMillis": 1800000,
+              "previewImage": "./assets/widget-preview.png"
+            }
+          ]
         }
       ]
     ],

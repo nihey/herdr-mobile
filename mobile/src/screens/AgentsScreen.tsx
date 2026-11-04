@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -41,6 +42,7 @@ import {
 import { StartAgentModal } from './StartAgentModal';
 import { NewSessionSheet } from './NewSessionSheet';
 import { HermesRow } from './HermesRow';
+import { pinAgentWidget } from '@/widget/update';
 
 type StatusFilter = 'working' | 'blocked' | null;
 
@@ -55,6 +57,7 @@ export function AgentsScreen() {
   const [settings, setSettings] = useState(false);
   const [help, setHelp] = useState(false);
   const [forgetError, setForgetError] = useState('');
+  const [widgetHint, setWidgetHint] = useState('');
   const [startPane, setStartPane] = useState<Pane | null>(null);
   const matches = (workspaceId: string, content: string) =>
     (!workspace || workspace === workspaceId) &&
@@ -493,7 +496,10 @@ export function AgentsScreen() {
       <Sheet
         visible={settings}
         title="your connection"
-        onClose={() => setSettings(false)}
+        onClose={() => {
+          setSettings(false);
+          setWidgetHint('');
+        }}
       >
         <Text selectable style={s.body}>
           {connection?.url}
@@ -510,6 +516,24 @@ export function AgentsScreen() {
             router.push('/machines');
           }}
         />
+        {Platform.OS === 'android' && (
+          <>
+            <Button
+              title="add home screen widget"
+              variant="secondary"
+              onPress={() => {
+                void pinAgentWidget().then((shown) => {
+                  if (shown) setSettings(false);
+                  else
+                    setWidgetHint(
+                      'Your launcher cannot add it from here. Long-press your home screen, tap Widgets, then find Herd Remote.',
+                    );
+                });
+              }}
+            />
+            {!!widgetHint && <Notice message={widgetHint} />}
+          </>
+        )}
         {!!forgetError && <Notice message={forgetError} danger />}
         <Button
           title="forget connection"

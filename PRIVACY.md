@@ -1,6 +1,6 @@
 # Herd Remote privacy policy
 
-Effective November 3, 2026.
+Effective November 4, 2026.
 
 Herd Remote is an unofficial Android companion for [Herdr](https://github.com/herdrdev/herdr). It is not affiliated with the Herdr project. Its source is published at <https://github.com/nihey/herdr-mobile>.
 
@@ -19,6 +19,10 @@ Removing a machine in the app deletes its saved entry. Uninstalling the app, or 
 
 The app sends requests only to the bridge addresses that you enter or pick. The recommended setup is your private Tailscale network. These requests carry the pairing token, the prompts, keys and text that you send, the sessions and terminals that you start (project or home folder, agent kind and name), the commands that you run in terminals, and the agent status and terminal output that your computer returns. When you open device discovery, they also return the names and private addresses of the devices on your tailnet. This data moves between your phone and your own computer. It is not sent to the developer or to any other party, except what you choose to send to Hermes's model provider (see Hermes).
 
+## Home screen widget
+
+If you add the optional home screen widget, it shows the active machine's name and its agents' names, project names, status and terminal titles on your home screen, drawn by your launcher. It reads them from your own bridge, the same way the app does: when you add or resize it, tap refresh, every 30 minutes, and while the app is open. It keeps the last list in memory, to show it dimmed while the bridge can't be reached. The only copy on the phone's storage is the picture of the widget as last drawn, kept in the app's private storage until the next redraw or until you remove the widget, and left out of backups. The widget only reads. It never sends anything to your agents.
+
 ## Hermes
 
 The app includes an optional chat with a Hermes agent that runs on your computer, started by your bridge. Hermes starts when you open the Hermes chat. When you use it, your messages to Hermes, and what Hermes reads from your agents to answer (their names, task titles, project names and folders, status and recent terminal output, which can include code, logs or anything an agent printed), are sent from your computer to the AI model provider that Hermes is configured to use there. By default that is OpenAI, through your own Codex sign-in. When Hermes starts with a model it has not used before, it first sends one short test request with no agent data. The conversation is kept on your computer in Hermes's own session store. Nothing is sent to a model provider unless you open the Hermes chat. Reporting a reply opens a draft email in your email app; nothing is sent unless you send it.
@@ -31,6 +35,7 @@ The app records audio only while dictation is on. Dictation starts when you tap 
 
 - **Internet:** connects to your bridges.
 - **Microphone:** on-device dictation, only while you are dictating.
+- **Background work** (keep awake, network state, run at startup): lets Android run the home screen widget's updates. They are not shown as permission prompts.
 
 ## Children
 
