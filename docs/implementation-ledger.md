@@ -51,3 +51,11 @@
 - `react-native-android-widget` 0.26.0 through its Expo config plugin. New entry `mobile/index.ts`. Read-only `MachineStore.peek()`, explicit `WIDGET_AGENTS` query (valid on 0.4.0), snapshot in memory only. App polls and machine changes redraw it. Settings sheet pin button and a preview image taken from the emulator with example data.
 - Emulator checks found two bugs, both fixed: fragments are unsupported in widget trees, and the agent screen's back arrow was dead when the widget opened it on a cold start. `FOREGROUND_SERVICE` blocked. Evidence in docs/verification.md.
 - Released as 0.7.0 (code 8) together with the `fix/hermes-latest` merge (the Hermes host on the latest Hermes). 210 tests pass. Play bundle built with the upload key for the internal testing track.
+
+## Start Herdr from the phone
+
+- User's Herdr server crashed while they were away from the desk, with no way to start it again. User approved the design in chat: a **start herdr** button on the home screen when the bridge is up but Herdr is not; start only, never automatic, never a second copy, never stop or restart. A frozen Herdr is out of scope. User didn't answer whether Herdr should restart by itself; the builder kept it button-only.
+- Herdr 0.9.4 checked on disposable sessions: `herdr server` refuses a second copy; a crashed server leaves a socket that refuses connections, a new server replaces it and answers in about 1 s, and Herdr restores its saved workspaces and resumes agents itself.
+- The bridge runs the server in its own transient systemd user unit (`systemd-run --user`), so restarting the bridge service leaves Herdr running; a tracked detached child where there is no systemd.
+- Independent review found that every connection error counted as "not running", which could start a second Herdr over a frozen one; fixed with the separate `not_running` code. Also fixed: the untracked detached child, inherited npm and tmux variables, unit names, and the card losing its state when the poll's error changed. Evidence in docs/verification.md.
+- Not changed: pairing a new machine fails while its Herdr is down.
