@@ -59,3 +59,4 @@
 - The bridge runs the server in its own transient systemd user unit (`systemd-run --user`), so restarting the bridge service leaves Herdr running; a tracked detached child where there is no systemd.
 - Independent review found that every connection error counted as "not running", which could start a second Herdr over a frozen one; fixed with the separate `not_running` code. Also fixed: the untracked detached child, inherited npm and tmux variables, unit names, and the card losing its state when the poll's error changed. Evidence in docs/verification.md.
 - Not changed: pairing a new machine fails while its Herdr is down.
+- Released as 0.8.0 (code 9). 263 tests pass. Release APK (arm64, upload key) sent to the user over Telegram; no Play bundle built yet.

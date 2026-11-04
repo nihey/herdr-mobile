@@ -1,6 +1,6 @@
 # Verification — October 15, 2026
 
-## Unreleased: start Herdr from the phone — November 4, 2026
+## Version 0.8.0: start Herdr from the phone — November 4, 2026
 
 - Why: Herdr's server exited on the user's computer (its log shows `herdr exiting` at 09:25 and a manual start at 09:41) and the phone had no way to bring it back. On start, Herdr 0.9.4 restored all 19 saved workspaces and ran `claude --resume <id>` in each agent pane by itself, so starting the server is enough.
 - Herdr behavior checked on disposable named sessions: `herdr --session <name> server` stays in the foreground and refuses a second copy (`herdr server is already running`, exit 1); after `kill -9` the stale socket refuses connections (the bridge's `not_running`) and a new server replaces it, answering ping in about 1 s; `HERDR_SOCKET_PATH` does not move a named session's socket, so the bridge maps the socket path to a session instead.
