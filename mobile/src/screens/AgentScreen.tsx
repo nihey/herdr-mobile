@@ -293,7 +293,10 @@ export function AgentScreen({ paneId, raw }: { paneId: string; raw: boolean }) {
         >
           <IconButton
             label="Back to agents"
-            onPress={() => router.back()}
+            // Opened from the home screen widget, the agent is the only screen.
+            onPress={() =>
+              router.canGoBack() ? router.back() : router.replace('/')
+            }
             size={42}
           >
             <ArrowLeft size={20} color={c.text} />
