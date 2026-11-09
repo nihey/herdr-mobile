@@ -39,6 +39,14 @@ export type DiscoveredMachine = {
   self: boolean;
 };
 export type Project = { id: string; label: string; cwd: string | null };
+/** A folder on the computer, by name only. */
+export type Folder = { name: string; path: string };
+export type FolderListing = {
+  path: string;
+  parent: string | null;
+  folders: Folder[];
+  truncated: boolean;
+};
 export type StartedSession = {
   paneId: string;
   tabId: string;

@@ -192,6 +192,47 @@ export const START_HOME_SESSION = gql`
     }
   }
 `;
+// Any folder on the computer (bridge after 0.8.0). Separate operations, so
+// an older bridge still serves projects and the home folder.
+export const FOLDERS = gql`
+  query Folders($path: String) {
+    folders(path: $path) {
+      path
+      parent
+      truncated
+      folders {
+        name
+        path
+      }
+    }
+  }
+`;
+export const START_FOLDER_SESSION = gql`
+  mutation StartFolderSession(
+    $folder: String!
+    $kind: String!
+    $name: String!
+  ) {
+    startSession(folder: $folder, kind: $kind, name: $name) {
+      paneId
+      tabId
+      workspaceId
+      name
+      kind
+      ready
+    }
+  }
+`;
+export const START_FOLDER_TERMINAL = gql`
+  mutation StartFolderTerminal($folder: String!) {
+    startTerminal(folder: $folder) {
+      paneId
+      tabId
+      workspaceId
+      ready
+    }
+  }
+`;
 // Hermes (bridge 0.6.0+). An older bridge rejects these; the app shows an
 // update notice in the Hermes row instead.
 export const HERMES = gql`

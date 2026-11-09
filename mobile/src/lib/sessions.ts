@@ -1,5 +1,5 @@
 import { CombinedGraphQLErrors } from '@apollo/client/errors';
-import type { Agent, Project } from './types';
+import type { Agent, Folder, Project } from './types';
 
 const AGENT_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 const FALLBACK_KINDS = ['claude', 'codex'];
@@ -72,11 +72,56 @@ export function cleanTitle(title: string | null | undefined) {
 export const HOME_LABEL = 'phone';
 /** Sheet-only choice for the home folder; sent to the bridge as null. */
 export const HOME = '~home';
+/** Sheet-only choice for a browsed folder; its path goes to the bridge. */
+export const FOLDER = '~folder';
 
 /** Open projects to offer; the home workspace is the Home folder entry. */
 export function listedProjects(projects: Project[]) {
   return projects.filter((project) => project.label !== HOME_LABEL);
 }
+
+/** A folder's last part (`/` for the root), as Herdr names its workspace. */
+export function folderName(path: string) {
+  return path.replace(/\/+$/, '').split('/').pop() || '/';
+}
+
+/**
+ * A path with the bridge's own home folder as `~` (unlike `shortPath`, never
+ * another user's home); unchanged when the home folder is unknown.
+ */
+export function homePath(path: string, home: string | null) {
+  if (!home) return path;
+  if (path === home) return '~';
+  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}
+
+/** Text typed in the folder browser that is a path to go to (`~…` or `/…`). */
+export function typedPath(text: string) {
+  const path = text.trim();
+  return /^[~/]/.test(path) ? path : null;
+}
+
+/**
+ * Folders to show for the browser's search text: names containing it,
+ * ignoring case. Hidden folders (a leading dot) only once the text starts
+ * with a dot; `hidden` counts those left out. A typed path filters nothing.
+ */
+export function browsable(folders: Folder[], text: string) {
+  const query = typedPath(text) === null ? text.trim().toLowerCase() : '';
+  const matching = folders.filter((f) => f.name.toLowerCase().includes(query));
+  const shown = query.startsWith('.')
+    ? matching
+    : matching.filter((f) => !f.name.startsWith('.'));
+  return { shown, hidden: matching.length - shown.length };
+}
+
+/** The open project whose folder this is, if any. */
+export function projectAt(projects: Project[], path: string) {
+  return projects.find((project) => project.cwd === path) ?? null;
+}
+
+export const OUTDATED_BRIDGE =
+  'This bridge is too old for this. On your computer, rebuild and restart the Herd Remote bridge, then try again.';
 
 /** Validation errors from a bridge that predates a field or argument. */
 const OUTDATED =

@@ -5,6 +5,7 @@ import { HerdrError } from './socket.js';
 import type { DiscoveredMachine } from './discovery.js';
 import { CoordinatorError, type Coordinator } from './hermes/coordinator.js';
 import type { StartHerdr } from './launch.js';
+import { listFolders } from './folders.js';
 import {
   createActions,
   defaultStartTiming,
@@ -170,6 +171,21 @@ export function buildSchema(
         working: Boolean!
         messages(last: Int = 100): [HermesMessage!]!
       }
+      "A folder on this computer, by name only (the bridge never reads files)."
+      type Folder {
+        name: String!
+        path: String!
+      }
+      type FolderListing {
+        "The real path of the listed folder."
+        path: String!
+        "Null at the root folder."
+        parent: String
+        "Subfolders by name, hidden ones (starting with a dot) last."
+        folders: [Folder!]!
+        "More subfolders than are listed."
+        truncated: Boolean!
+      }
       type DiscoveredMachine {
         id: ID!
         name: String!
@@ -185,6 +201,8 @@ export function buildSchema(
         agentKinds: [String!]!
         "The bridge user's home folder, where home terminals open."
         homeFolder: String
+        "Subfolders of a folder (~ and ~/... are the home folder; default: home)."
+        folders(path: String): FolderListing!
         "start: false (the home summary) never starts Hermes."
         hermes(start: Boolean = true): Hermes!
         output(
@@ -205,14 +223,15 @@ export function buildSchema(
         ): ActionResult!
         sendText(paneId: ID!, text: String!): ActionResult!
         startAgent(paneId: ID!, name: String!, kind: String!): ActionResult!
-        "Without a workspace, starts in the home workspace."
+        "Without a workspace or folder, starts in the home workspace. A folder opens in the project open there, else in a new workspace."
         startSession(
           workspaceId: ID
+          folder: String
           kind: String!
           name: String!
         ): StartedSession!
-        "A plain shell in a new tab. Without a workspace, in the home workspace."
-        startTerminal(workspaceId: ID): StartedTerminal!
+        "A plain shell in a new tab. Without a workspace or folder, in the home workspace; a folder works as in startSession."
+        startTerminal(workspaceId: ID, folder: String): StartedTerminal!
         "One message to Hermes; refused while it is still answering. Never retried."
         hermesSend(text: String!): ActionResult!
         hermesStop: ActionResult!
@@ -266,6 +285,8 @@ export function buildSchema(
           return [...new Set(kinds)];
         },
         homeFolder: () => homeDir,
+        folders: (_: unknown, args: { path?: string | null }) =>
+          listFolders(args.path ?? null, homeDir),
         hermes: (_: unknown, args: { start: boolean }) =>
           hermes?.conversation({ start: args.start }) ?? {
             status: 'unavailable',
@@ -359,17 +380,24 @@ export function buildSchema(
         },
         startSession: async (
           _: unknown,
-          args: { workspaceId?: string | null; name: string; kind: string },
+          args: {
+            workspaceId?: string | null;
+            folder?: string | null;
+            name: string;
+            kind: string;
+          },
         ) =>
           actions.startSession({
             workspaceId: args.workspaceId ?? null,
+            folder: args.folder ?? null,
             name: args.name,
             kind: args.kind,
           }),
         startTerminal: async (
           _: unknown,
-          args: { workspaceId?: string | null },
-        ) => actions.startTerminal(args.workspaceId ?? null),
+          args: { workspaceId?: string | null; folder?: string | null },
+        ) =>
+          actions.startTerminal(args.workspaceId ?? null, args.folder ?? null),
         hermesSend: (_: unknown, args: { text: string }) => {
           if (!args.text.trim() || Buffer.byteLength(args.text) > 16 * 1024)
             badInput('Enter a message shorter than 16 KiB.');

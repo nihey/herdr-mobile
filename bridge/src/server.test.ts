@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createBridge } from './server.js';
 import { HerdrError } from './socket.js';
 import { CoordinatorError, type Coordinator } from './hermes/coordinator.js';
@@ -68,6 +71,9 @@ function sessionSetup({
   agentProcess = true,
   totalMs = 9000,
   homeWorkspace = false,
+  homeDir = '/home/tester',
+  phoneCwd = '/work/elsewhere',
+  w3Cwd,
 }: {
   failStart?: string;
   shellBusyPolls?: number;
@@ -80,6 +86,11 @@ function sessionSetup({
   totalMs?: number;
   /** Whether a `phone` workspace (whose shell has left the home folder) exists. */
   homeWorkspace?: boolean;
+  homeDir?: string;
+  /** The folder of the `phone` workspace's first pane. */
+  phoneCwd?: string;
+  /** A folder for the otherwise empty project w3. */
+  w3Cwd?: string;
 } = {}) {
   let busyPolls = shellBusyPolls;
   let started = false;
@@ -90,7 +101,7 @@ function sessionSetup({
   }[] = [];
   const app = createBridge({
     token,
-    homeDir: '/home/tester',
+    homeDir,
     startTiming: {
       pollMs: 1,
       settleMs: 0,
@@ -177,7 +188,18 @@ function sessionSetup({
                       pane_id: 'w7:p1',
                       workspace_id: 'w7',
                       tab_id: 'w7:t1',
-                      cwd: '/work/elsewhere',
+                      cwd: phoneCwd,
+                      agent_status: 'idle',
+                    },
+                  ]
+                : []),
+              ...(w3Cwd
+                ? [
+                    {
+                      pane_id: 'w3:p1',
+                      workspace_id: 'w3',
+                      tab_id: 'w3:t1',
+                      cwd: w3Cwd,
                       agent_status: 'idle',
                     },
                   ]
@@ -886,6 +908,157 @@ function fakeCoordinator(overrides: Partial<Coordinator> = {}) {
   };
   return { coordinator, sent };
 }
+
+describe('sessions in any folder', () => {
+  let home: string;
+  const devel = () => join(home, 'devel');
+  beforeAll(async () => {
+    home = await realpath(await mkdtemp(join(tmpdir(), 'herd-bridge-')));
+    await mkdir(join(home, 'devel', 'notes-app'), { recursive: true });
+    await mkdir(join(home, 'devel', 'site'), { recursive: true });
+  });
+  afterAll(async () => {
+    await rm(home, { recursive: true, force: true });
+  });
+  it('lists the subfolders of a folder', async () => {
+    const { query, calls } = sessionSetup({ homeDir: home });
+    const { body } = await query(
+      '{ folders(path: "~/devel") { path parent truncated folders { name path } } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.folders).toEqual({
+      path: devel(),
+      parent: home,
+      truncated: false,
+      folders: [
+        { name: 'notes-app', path: join(devel(), 'notes-app') },
+        { name: 'site', path: join(devel(), 'site') },
+      ],
+    });
+    expect(calls).toHaveLength(0);
+  });
+  it('lists the home folder when no folder is given', async () => {
+    const { query } = sessionSetup({ homeDir: home });
+    const { body } = await query('{ folders { path folders { name } } }');
+    expect(body.errors).toBeUndefined();
+    expect(body.data.folders).toEqual({
+      path: home,
+      folders: [{ name: 'devel' }],
+    });
+  });
+  it('requires the token to list folders', async () => {
+    const { query } = setup();
+    const { status } = await query('{ folders { path } }', {}, false);
+    expect(status).toBe(401);
+  });
+  it('opens a new unfocused workspace for a folder not open in Herdr', async () => {
+    const { query, calls } = sessionSetup({ homeDir: home });
+    const folder = join(devel(), 'notes-app');
+    const { body } = await query(
+      `mutation { startSession(folder: ${JSON.stringify(folder)}, kind:"claude", name:"claude-5") { paneId tabId workspaceId ready } }`,
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startSession).toEqual({
+      paneId: 'w8:p1',
+      tabId: 'w8:t1',
+      workspaceId: 'w8',
+      ready: true,
+    });
+    // No label: Herdr names the workspace after its folder, as on the computer.
+    expect(calls.find((c) => c.method === 'workspace.create')?.params).toEqual({
+      cwd: folder,
+      focus: false,
+    });
+    expect(calls.some((c) => c.method === 'tab.create')).toBe(false);
+    expect(calls.find((c) => c.method === 'agent.start')?.params).toMatchObject(
+      {
+        pane_id: 'w8:p1',
+        name: 'claude-5',
+        kind: 'claude',
+      },
+    );
+  });
+  it('opens a plain terminal in a new workspace for a folder', async () => {
+    const { query, calls } = sessionSetup({ homeDir: home });
+    const { body } = await query(
+      'mutation { startTerminal(folder: "~/devel/notes-app") { paneId workspaceId ready } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startTerminal).toEqual({
+      paneId: 'w8:p1',
+      workspaceId: 'w8',
+      ready: true,
+    });
+    expect(calls.map((c) => c.method)).toEqual([
+      'session.snapshot',
+      'workspace.create',
+      'pane.process_info',
+    ]);
+  });
+  it('opens a tab in the project already open in that folder', async () => {
+    const site = join(devel(), 'site');
+    const { query, calls } = sessionSetup({ homeDir: home, w3Cwd: site });
+    const { body } = await query(
+      'mutation { startTerminal(folder: "~/devel/site") { workspaceId } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startTerminal.workspaceId).toBe('w3');
+    expect(calls.some((c) => c.method === 'workspace.create')).toBe(false);
+    expect(calls.find((c) => c.method === 'tab.create')?.params).toEqual({
+      workspace_id: 'w3',
+      label: 'terminal',
+      focus: false,
+      cwd: site,
+    });
+  });
+  it('never takes the phone workspace for a project folder', async () => {
+    const site = join(devel(), 'site');
+    const { query, calls } = sessionSetup({
+      homeDir: home,
+      homeWorkspace: true,
+      phoneCwd: site,
+    });
+    const { body } = await query(
+      'mutation { startTerminal(folder: "~/devel/site") { workspaceId } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startTerminal.workspaceId).toBe('w8');
+    expect(calls.find((c) => c.method === 'workspace.create')?.params).toEqual({
+      cwd: site,
+      focus: false,
+    });
+  });
+  it('uses the home workspace for the home folder', async () => {
+    const { query, calls } = sessionSetup({
+      homeDir: home,
+      homeWorkspace: true,
+    });
+    const { body } = await query(
+      'mutation { startTerminal(folder: "~") { workspaceId } }',
+    );
+    expect(body.errors).toBeUndefined();
+    expect(body.data.startTerminal.workspaceId).toBe('w7');
+    expect(calls.find((c) => c.method === 'tab.create')?.params).toEqual({
+      workspace_id: 'w7',
+      label: 'terminal',
+      focus: false,
+      cwd: home,
+    });
+  });
+  it('checks the folder before contacting Herdr', async () => {
+    const { query, calls } = sessionSetup({ homeDir: home });
+    for (const operation of [
+      'mutation { startSession(folder:"~/devel/missing", kind:"claude", name:"ok") { paneId } }',
+      'mutation { startTerminal(folder:"devel") { paneId } }',
+      'mutation { startTerminal(workspaceId:"w1", folder:"~/devel/site") { paneId } }',
+      'mutation { startSession(workspaceId:"w1", folder:"~/devel/site", kind:"claude", name:"ok") { paneId } }',
+    ]) {
+      const { body } = await query(operation);
+      expect(body.errors?.[0].extensions.code).toBe('BAD_USER_INPUT');
+    }
+    expect(calls).toHaveLength(0);
+  });
+});
 
 describe('Hermes over GraphQL', () => {
   it('reports Hermes as unavailable when not set up', async () => {

@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   FolderOpen,
+  FolderSearch,
   House,
   Pencil,
   TerminalSquare,
@@ -17,6 +18,8 @@ import {
   NEW_SESSION_OPTIONS,
   PROMPT,
   SEND_TEXT,
+  START_FOLDER_SESSION,
+  START_FOLDER_TERMINAL,
   START_HOME_SESSION,
   START_SESSION,
   START_TERMINAL,
@@ -25,10 +28,14 @@ import { errorMessage } from '@/lib/errors';
 import { handOff } from '@/lib/handoff';
 import { languageInfo } from '@/lib/dictation';
 import {
+  FOLDER,
+  folderName,
   HOME,
   isOutdated,
   kindChoices,
   listedProjects,
+  OUTDATED_BRIDGE,
+  projectAt,
   shortPath,
   suggestName,
   terminalsSupported,
@@ -56,12 +63,10 @@ import {
   DictationControl,
   SpeechModelSheet,
 } from '@/components/DictationControl';
+import { FolderBrowser, type ChosenFolder } from './FolderBrowser';
 
 /** The kind chip for a plain shell (no agent). */
 const TERMINAL = 'terminal';
-
-const outdatedBridge =
-  'This bridge is too old for this. On your computer, rebuild and restart the Herd Remote bridge, then try again.';
 
 /** The pane Herdr opened before the agent failed, and the daemon's code. */
 function openedPane(reason: unknown) {
@@ -76,7 +81,7 @@ function openedPane(reason: unknown) {
 }
 
 function startError(reason: unknown, terminal: boolean) {
-  if (isOutdated(reason)) return outdatedBridge;
+  if (isOutdated(reason)) return OUTDATED_BRIDGE;
   if (
     CombinedGraphQLErrors.is(reason) ||
     (ServerError.is(reason) && reason.statusCode === 401)
@@ -107,7 +112,10 @@ export function NewSessionSheet({
   const [canTerminal, setCanTerminal] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId);
+  // The folder chosen by browsing (workspaceId FOLDER).
+  const [folder, setFolder] = useState<ChosenFolder | null>(null);
   const [picking, setPicking] = useState(!initialWorkspaceId);
+  const [browsing, setBrowsing] = useState(false);
   const [filter, setFilter] = useState('');
   const [kind, setKind] = useState('');
   const [showMore, setShowMore] = useState(false);
@@ -140,7 +148,7 @@ export function NewSessionSheet({
       .catch((reason: unknown) => {
         if (alive.current)
           setLoadError(
-            isOutdated(reason) ? outdatedBridge : errorMessage(reason),
+            isOutdated(reason) ? OUTDATED_BRIDGE : errorMessage(reason),
           );
       });
     // Separate, so an older bridge still lists projects for agent sessions.
@@ -167,17 +175,18 @@ export function NewSessionSheet({
   const project =
     workspaceId === HOME
       ? home
-      : (projects?.find((p) => p.id === workspaceId) ?? null);
+      : workspaceId === FOLDER && folder
+        ? { id: FOLDER, label: folderName(folder.path), cwd: folder.path }
+        : (projects?.find((p) => p.id === workspaceId) ?? null);
   // A preselected project that has since closed falls back to the list.
   const showPicker = picking || !project;
+  // An open project's ID; null for the home folder or a browsed folder.
+  const target =
+    project && project.id !== HOME && project.id !== FOLDER ? project.id : null;
+  const chosenFolder = project?.id === FOLDER ? project.cwd : null;
   const choices = useMemo(
-    () =>
-      kindChoices(
-        agents,
-        workspaceId && workspaceId !== HOME ? workspaceId : '',
-        supported,
-      ),
-    [agents, workspaceId, supported],
+    () => kindChoices(agents, target ?? '', supported),
+    [agents, target, supported],
   );
   const chosenKind = kind || choices.primary[0] || '';
   const terminal = chosenKind === TERMINAL;
@@ -185,25 +194,34 @@ export function NewSessionSheet({
   const name = customName ?? submittedName ?? suggestName(chosenKind, taken);
   const duplicate = !terminal && taken.includes(name);
   const unsupported = !canTerminal && (terminal || workspaceId === HOME);
-  const visible = [home, ...(projects ?? [])].filter((p) =>
+  const matches = (p: Project) =>
     [p.label, p.cwd]
       .join(' ')
       .toLowerCase()
-      .includes(filter.trim().toLowerCase()),
-  );
-  const target = project?.id === HOME ? null : (project?.id ?? null);
+      .includes(filter.trim().toLowerCase());
+  const homeVisible = matches(home);
+  const visible = (projects ?? []).filter(matches);
   const place = project?.id === HOME ? 'your home folder' : project?.label;
 
-  const choose = (id: string) => {
-    if (id !== workspaceId) {
+  const choose = (id: string, chosen: ChosenFolder | null = null) => {
+    if (id !== workspaceId || chosen?.path !== folder?.path) {
       if (kind !== TERMINAL) setKind('');
       setShowMore(false);
       setSubmittedName(null);
     }
     setWorkspaceId(id);
+    setFolder(chosen);
     setPicking(false);
+    setBrowsing(false);
     setError('');
     setOrphan(null);
+  };
+  // The home folder and open projects' folders keep their usual place.
+  const chooseFolder = (chosen: ChosenFolder) => {
+    const open = projectAt(projects ?? [], chosen.path);
+    if (chosen.home || chosen.path === homeFolder) choose(HOME);
+    else if (open) choose(open.id);
+    else choose(FOLDER, chosen);
   };
 
   const begin = () => {
@@ -228,10 +246,14 @@ export function NewSessionSheet({
     const command = task.trim() ? task : '';
     let started: StartedTerminal;
     try {
-      const result = await client.mutate<{ startTerminal: StartedTerminal }>({
-        mutation: START_TERMINAL,
-        variables: { workspaceId: target },
-      });
+      const result = await client.mutate<{ startTerminal: StartedTerminal }>(
+        chosenFolder !== null
+          ? {
+              mutation: START_FOLDER_TERMINAL,
+              variables: { folder: chosenFolder },
+            }
+          : { mutation: START_TERMINAL, variables: { workspaceId: target } },
+      );
       if (!result.data) throw new Error('No terminal returned.');
       started = result.data.startTerminal;
     } catch (reason) {
@@ -285,15 +307,20 @@ export function NewSessionSheet({
     let started: StartedSession;
     try {
       const result = await client.mutate<{ startSession: StartedSession }>({
-        ...(target === null
+        ...(chosenFolder !== null
           ? {
-              mutation: START_HOME_SESSION,
-              variables: { kind: chosenKind, name },
+              mutation: START_FOLDER_SESSION,
+              variables: { folder: chosenFolder, kind: chosenKind, name },
             }
-          : {
-              mutation: START_SESSION,
-              variables: { workspaceId: target, kind: chosenKind, name },
-            }),
+          : target === null
+            ? {
+                mutation: START_HOME_SESSION,
+                variables: { kind: chosenKind, name },
+              }
+            : {
+                mutation: START_SESSION,
+                variables: { workspaceId: target, kind: chosenKind, name },
+              }),
       });
       if (!result.data) throw new Error('No session returned.');
       started = result.data.startSession;
@@ -340,13 +367,57 @@ export function NewSessionSheet({
     onOpen(started.paneId, false);
   };
 
+  const projectRow = (item: Project) => {
+    const selected = item.id === workspaceId;
+    const Icon = item.id === HOME ? House : FolderOpen;
+    return (
+      <Pressable
+        key={item.id}
+        accessibilityRole="button"
+        accessibilityLabel={`Choose ${item.label}`}
+        accessibilityState={{ selected }}
+        onPress={() => choose(item.id)}
+        style={({ pressed }) => [
+          s.item,
+          s.row,
+          { paddingVertical: 10 },
+          (selected || pressed) && s.selected,
+        ]}
+      >
+        <Icon size={16} color={c.accent} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text numberOfLines={1} style={[s.body, { fontWeight: '700' }]}>
+            {item.label}
+          </Text>
+          {!!item.cwd && (
+            <Text numberOfLines={1} ellipsizeMode="middle" style={s.eyebrow}>
+              {shortPath(item.cwd)}
+            </Text>
+          )}
+        </View>
+        {selected ? (
+          <Check size={16} color={c.accent} />
+        ) : (
+          <ChevronRight size={16} color={c.dim} />
+        )}
+      </Pressable>
+    );
+  };
+
   return (
     <Sheet
       visible
-      title={showPicker ? 'choose a project' : 'new'}
+      title={
+        showPicker && browsing
+          ? 'choose a folder'
+          : showPicker
+            ? 'choose a project'
+            : 'new'
+      }
       onClose={() => {
         if (busy) return;
-        if (showPicker && project) setPicking(false);
+        if (showPicker && browsing) setBrowsing(false);
+        else if (showPicker && project) setPicking(false);
         else onClose();
       }}
     >
@@ -356,11 +427,15 @@ export function NewSessionSheet({
           <Loading label="finding your projects…" />
         </View>
       )}
-      {projects && showPicker && (
+      {projects && showPicker && browsing && (
+        <FolderBrowser onChoose={chooseFolder} />
+      )}
+      {projects && showPicker && !browsing && (
         <>
           <Text style={s.muted}>
             Projects open in Herdr on {activeMachine?.name ?? 'your computer'},
-            or your home folder. Each new session or terminal gets its own tab.
+            your home folder, or any other folder. Each new session or terminal
+            gets its own tab.
           </Text>
           {projects.length > 6 && (
             <Field
@@ -371,50 +446,38 @@ export function NewSessionSheet({
             />
           )}
           <View style={{ gap: 2 }}>
-            {visible.map((item) => {
-              const selected = item.id === workspaceId;
-              const Icon = item.id === HOME ? House : FolderOpen;
-              return (
-                <Pressable
-                  key={item.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Choose ${item.label}`}
-                  accessibilityState={{ selected }}
-                  onPress={() => choose(item.id)}
-                  style={({ pressed }) => [
-                    s.item,
-                    s.row,
-                    { paddingVertical: 10 },
-                    (selected || pressed) && s.selected,
-                  ]}
+            {homeVisible && projectRow(home)}
+            {/* Right under the home folder, whatever the project filter. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Browse folders on your computer"
+              onPress={() => setBrowsing(true)}
+              style={({ pressed }) => [
+                s.item,
+                s.row,
+                { paddingVertical: 10 },
+                (workspaceId === FOLDER || pressed) && s.selected,
+              ]}
+            >
+              <FolderSearch size={16} color={c.accent} />
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={[s.body, { fontWeight: '700' }]}>
+                  browse folders…
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  ellipsizeMode="middle"
+                  style={s.eyebrow}
                 >
-                  <Icon size={16} color={c.accent} />
-                  <View style={{ flex: 1, gap: 2 }}>
-                    <Text
-                      numberOfLines={1}
-                      style={[s.body, { fontWeight: '700' }]}
-                    >
-                      {item.label}
-                    </Text>
-                    {!!item.cwd && (
-                      <Text
-                        numberOfLines={1}
-                        ellipsizeMode="middle"
-                        style={s.eyebrow}
-                      >
-                        {shortPath(item.cwd)}
-                      </Text>
-                    )}
-                  </View>
-                  {selected ? (
-                    <Check size={16} color={c.accent} />
-                  ) : (
-                    <ChevronRight size={16} color={c.dim} />
-                  )}
-                </Pressable>
-              );
-            })}
-            {!visible.length && (
+                  {workspaceId === FOLDER && folder
+                    ? folder.label
+                    : 'any folder on your computer'}
+                </Text>
+              </View>
+              <ChevronRight size={16} color={c.dim} />
+            </Pressable>
+            {visible.map(projectRow)}
+            {!homeVisible && !visible.length && (
               <Text style={s.muted}>No open project matches.</Text>
             )}
           </View>
@@ -434,6 +497,8 @@ export function NewSessionSheet({
           >
             {project.id === HOME ? (
               <House size={16} color={c.accent} />
+            ) : project.id === FOLDER ? (
+              <FolderSearch size={16} color={c.accent} />
             ) : (
               <FolderOpen size={16} color={c.accent} />
             )}
@@ -447,7 +512,9 @@ export function NewSessionSheet({
                   ellipsizeMode="middle"
                   style={s.eyebrow}
                 >
-                  {shortPath(project.cwd)}
+                  {project.id === FOLDER && folder
+                    ? folder.label
+                    : shortPath(project.cwd)}
                 </Text>
               )}
             </View>
@@ -597,12 +664,16 @@ export function NewSessionSheet({
           </View>
 
           <Text style={s.muted}>
-            {terminal
-              ? `Opens a new tab in ${place} on your computer with a plain shell.`
-              : `Opens a new tab in ${place} on your computer and starts ${chosenKind || 'the agent'} there.`}{' '}
+            {chosenFolder !== null
+              ? terminal
+                ? `Opens ${folder?.label} on your computer in its own Herdr workspace (a new tab if it is already open there) with a plain shell.`
+                : `Opens ${folder?.label} on your computer in its own Herdr workspace (a new tab if it is already open there) and starts ${chosenKind || 'the agent'} there.`
+              : terminal
+                ? `Opens a new tab in ${place} on your computer with a plain shell.`
+                : `Opens a new tab in ${place} on your computer and starts ${chosenKind || 'the agent'} there.`}{' '}
             Your other agents keep running untouched.
           </Text>
-          {unsupported && <Notice message={outdatedBridge} danger />}
+          {unsupported && <Notice message={OUTDATED_BRIDGE} danger />}
           {!!error && <Notice message={error} danger />}
           {!!orphan && (
             <Button

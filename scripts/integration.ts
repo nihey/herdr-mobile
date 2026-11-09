@@ -4,12 +4,14 @@ import { randomBytes } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { HerdrClient } from '../bridge/src/socket.js';
 import { createBridge } from '../bridge/src/server.js';
@@ -313,6 +315,58 @@ try {
     ),
     'The new terminal did not run the command.',
   );
+  // Any folder: browse to one that is not open in Herdr, start a session there
+  // (a new workspace named after it), then a terminal in the same folder (a
+  // new tab in that now-open project, not a second workspace).
+  const project = join(realpathSync(fakeHome), 'devel', 'notes-app');
+  mkdirSync(project, { recursive: true });
+  mkdirSync(join(fakeHome, 'devel', '.hidden'));
+  const browsed = await execute<{
+    folders: { path: string; folders: { name: string; path: string }[] };
+  }>('{ folders(path: "~/devel") { path folders { name path } } }');
+  assert.deepEqual(browsed.folders.folders, [
+    { name: 'notes-app', path: project },
+    { name: '.hidden', path: join(dirname(project), '.hidden') },
+  ]);
+  const before = await execute<{ session: { workspaces: { id: string }[] } }>(
+    '{ session { workspaces { id } } }',
+  );
+  const inFolder = (
+    await execute<{
+      startSession: { paneId: string; workspaceId: string; ready: boolean };
+    }>(
+      'mutation($f:String!){startSession(folder:$f,kind:"codex",name:"folder-session"){paneId workspaceId ready}}',
+      { f: '~/devel/notes-app' },
+    )
+  ).startSession;
+  assert.equal(inFolder.ready, true, 'The folder session did not start.');
+  const folderTerminal = (
+    await execute<Started>(
+      'mutation($f:String!){startTerminal(folder:$f){paneId tabId workspaceId ready}}',
+      { f: project },
+    )
+  ).startTerminal;
+  assert.equal(folderTerminal.workspaceId, inFolder.workspaceId);
+  const folderLayout = await execute<{
+    session: {
+      workspaces: { id: string; label: string }[];
+      panes: { id: string; cwd: string | null }[];
+    };
+  }>('{ session { workspaces { id label } panes { id cwd } } }');
+  assert.equal(
+    folderLayout.session.workspaces.length,
+    before.session.workspaces.length + 1,
+  );
+  assert.equal(
+    folderLayout.session.workspaces.find((w) => w.id === inFolder.workspaceId)
+      ?.label,
+    'notes-app',
+  );
+  for (const id of [inFolder.paneId, folderTerminal.paneId])
+    assert.equal(
+      folderLayout.session.panes.find((p) => p.id === id)?.cwd,
+      project,
+    );
   // Hermes coordinator: the real host with a scripted fake model (no model
   // calls), acting only on this disposable session through the bridge tools.
   const hermesPython = join(homedir(), '.hermes/hermes-agent/venv/bin/python');
@@ -454,7 +508,7 @@ try {
     }
   }
   console.log(
-    `Live integration passed against Herdr ${session.session.version}: authenticated snapshot → literal terminal text → Enter → captured output; new session tab → agent start → first task; terminal tab → command; home workspace → reused.${hermesSummary}`,
+    `Live integration passed against Herdr ${session.session.version}: authenticated snapshot → literal terminal text → Enter → captured output; new session tab → agent start → first task; terminal tab → command; home workspace → reused; folder browse → new workspace → its project reused.${hermesSummary}`,
   );
 } finally {
   if (client) await client.request('server.stop').catch(() => {});

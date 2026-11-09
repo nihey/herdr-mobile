@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { CombinedGraphQLErrors } from '@apollo/client/errors';
 import {
   attentionOrder,
+  browsable,
   cleanTitle,
+  folderName,
+  homePath,
   kindChoices,
   listedProjects,
+  projectAt,
   shortPath,
   suggestName,
   terminalsSupported,
+  typedPath,
   validAgentName,
 } from './sessions';
 import { clearHandoff, handOff, peekHandoff } from './handoff';
@@ -156,5 +161,56 @@ describe('terminals and the home folder', () => {
     });
     expect(terminalsSupported(required)).toBe(false);
     expect(terminalsSupported(variable)).toBe(false);
+  });
+});
+
+describe('choosing any folder', () => {
+  const folder = (name: string) => ({ name, path: `/home/me/devel/${name}` });
+  const folders = ['Alpha', 'notes-app', 'site', '.cache', '.config'].map(
+    folder,
+  );
+  it('names a folder by its last part', () => {
+    expect(folderName('/home/me/devel/notes-app')).toBe('notes-app');
+    expect(folderName('/home/me/devel/notes-app/')).toBe('notes-app');
+    expect(folderName('/')).toBe('/');
+  });
+  it('leaves hidden folders out, and counts them', () => {
+    expect(browsable(folders, '')).toEqual({
+      shown: folders.slice(0, 3),
+      hidden: 2,
+    });
+  });
+  it('filters by name, ignoring case', () => {
+    expect(browsable(folders, 'NOTES').shown).toEqual([folder('notes-app')]);
+    expect(browsable(folders, 'x').shown).toEqual([]);
+  });
+  it('shows hidden folders once a dot is typed', () => {
+    expect(browsable(folders, '.').shown).toEqual(folders.slice(3));
+    expect(browsable(folders, '.conf').shown).toEqual([folder('.config')]);
+  });
+  it('treats text starting with ~ or / as a path to go to', () => {
+    expect(typedPath(' ~/devel/notes-app ')).toBe('~/devel/notes-app');
+    expect(typedPath('~')).toBe('~');
+    expect(typedPath('/srv')).toBe('/srv');
+    expect(typedPath('devel')).toBeNull();
+    expect(typedPath('')).toBeNull();
+  });
+  it('lists everything while a path is typed', () => {
+    expect(browsable(folders, '~/devel').shown).toEqual(folders.slice(0, 3));
+  });
+  it("shortens only the bridge's own home folder to ~", () => {
+    expect(homePath('/home/me', '/home/me')).toBe('~');
+    expect(homePath('/home/me/devel/x', '/home/me')).toBe('~/devel/x');
+    expect(homePath('/home/alice/devel', '/home/me')).toBe('/home/alice/devel');
+    expect(homePath('/home/meet', '/home/me')).toBe('/home/meet');
+    expect(homePath('/srv/x', null)).toBe('/srv/x');
+  });
+  it('finds the open project in a folder', () => {
+    const projects = [
+      { id: 'w1', label: 'api', cwd: '/home/me/devel/api' },
+      { id: 'w2', label: 'site', cwd: '/home/me/devel/site' },
+    ];
+    expect(projectAt(projects, '/home/me/devel/site')?.id).toBe('w2');
+    expect(projectAt(projects, '/home/me/devel')).toBeNull();
   });
 });

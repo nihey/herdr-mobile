@@ -27,6 +27,9 @@ const needsNewer = [
   'HERMES_STOP',
   'HERMES_NEW',
   'START_HERDR',
+  'FOLDERS',
+  'START_FOLDER_SESSION',
+  'START_FOLDER_TERMINAL',
 ];
 
 const documents = Object.entries(operations).filter(
