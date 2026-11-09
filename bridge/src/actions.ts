@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { GraphQLError } from 'graphql';
+import { resolveFolder } from './folders.js';
 import { HerdrError } from './socket.js';
 
 /**
@@ -96,6 +97,12 @@ export type StartedTerminal = {
   ready: boolean;
 };
 export type HerdrActions = ReturnType<typeof createActions>;
+/** Where a new tab goes; `opened` when creating the workspace opened it. */
+type Placement = {
+  workspaceId: string;
+  cwd: string | null;
+  opened?: { paneId: string; tabId: string };
+};
 
 export function createActions(
   request: RequestHerdr,
@@ -169,29 +176,14 @@ export function createActions(
     }
     return false;
   }
-  /**
-   * Where a new tab goes: an open project in its folder, or (no workspace) the
-   * home workspace in the home folder. The home workspace is found by label
-   * alone: Herdr workspaces have no folder of their own and a shell's folder
-   * changes with every cd. Creating it opens its first pane, which the caller
-   * uses instead of a new tab. Never retried.
-   */
-  async function placement(snapshot: Snapshot, workspaceId: string | null) {
-    if (workspaceId !== null) {
-      if (!snapshot.workspaces?.some((w) => w.workspace_id === workspaceId))
-        badInput(
-          'That project is no longer open in Herdr. Refresh and choose another.',
-        );
-      return { workspaceId, cwd: projectCwd(snapshot, workspaceId) };
-    }
-    const home = snapshot.workspaces?.find(
-      (w) => w.label === HOME_WORKSPACE_LABEL,
-    );
-    const homeId = nonEmpty(home?.workspace_id);
-    if (homeId) return { workspaceId: homeId, cwd: homeDir };
+  /** A new unfocused workspace; its first pane is used instead of a new tab. */
+  async function createWorkspace(
+    params: RecordValue,
+    cwd: string,
+  ): Promise<Placement> {
     const created = await call('workspace.create', {
-      label: HOME_WORKSPACE_LABEL,
-      cwd: homeDir,
+      ...params,
+      cwd,
       focus: false,
     });
     const createdId = nonEmpty(
@@ -202,13 +194,63 @@ export function createActions(
     );
     const tabId = nonEmpty((created.tab as RecordValue | undefined)?.tab_id);
     if (!createdId || !paneId || !tabId) throw missingTab();
-    return { workspaceId: createdId, cwd: homeDir, opened: { paneId, tabId } };
+    return { workspaceId: createdId, cwd, opened: { paneId, tabId } };
+  }
+  /**
+   * Where a new tab goes: an open project in its folder; a chosen folder (the
+   * project open there, else a new workspace in it); or neither, the home
+   * workspace in the home folder. The home workspace is found by label alone:
+   * Herdr workspaces have no folder of their own and a shell's folder changes
+   * with every cd. Creating a workspace opens its first pane, which the caller
+   * uses instead of a new tab. Never retried.
+   */
+  async function placement(
+    snapshot: Snapshot,
+    workspaceId: string | null,
+    folder: { path: string; home: boolean } | null = null,
+  ): Promise<Placement> {
+    if (workspaceId !== null) {
+      if (!snapshot.workspaces?.some((w) => w.workspace_id === workspaceId))
+        badInput(
+          'That project is no longer open in Herdr. Refresh and choose another.',
+        );
+      return { workspaceId, cwd: projectCwd(snapshot, workspaceId) };
+    }
+    if (folder !== null && !folder.home) {
+      // The project whose folder this is, like the phone's project list. The
+      // home workspace is never a project, wherever its shell has moved.
+      const open = snapshot.workspaces?.find(
+        (w) =>
+          w.label !== HOME_WORKSPACE_LABEL &&
+          projectCwd(snapshot, w.workspace_id) === folder.path,
+      );
+      const openId = nonEmpty(open?.workspace_id);
+      if (openId) return { workspaceId: openId, cwd: folder.path };
+      // No label: Herdr names it after the folder, as on the computer.
+      return createWorkspace({}, folder.path);
+    }
+    const home = snapshot.workspaces?.find(
+      (w) => w.label === HOME_WORKSPACE_LABEL,
+    );
+    const homeId = nonEmpty(home?.workspace_id);
+    if (homeId) return { workspaceId: homeId, cwd: homeDir };
+    return createWorkspace({ label: HOME_WORKSPACE_LABEL }, homeDir);
+  }
+  /**
+   * A chosen folder, checked before Herdr is contacted: it must exist, and a
+   * project and a folder are never both given.
+   */
+  async function chosenFolder(
+    workspaceId: string | null,
+    folder: string | null | undefined,
+  ) {
+    if (folder === null || folder === undefined) return null;
+    if (workspaceId !== null)
+      badInput('Choose a project or a folder, not both.');
+    return resolveFolder(folder, homeDir);
   }
   /** Open a new unfocused tab (every existing pane stays untouched). */
-  async function openTab(
-    place: Awaited<ReturnType<typeof placement>>,
-    label: string,
-  ) {
+  async function openTab(place: Placement, label: string) {
     if (place.opened) return place.opened;
     const created = await call('tab.create', {
       workspace_id: place.workspaceId,
@@ -306,6 +348,8 @@ export function createActions(
   }
   async function startSession(args: {
     workspaceId: string | null;
+    /** Any folder on this computer, instead of a project. */
+    folder?: string | null;
     name: string;
     kind: string;
   }): Promise<StartedSession> {
@@ -313,7 +357,9 @@ export function createActions(
     if (workspaceId !== null) target(workspaceId);
     agentName(args.name);
     agentKind(args.kind);
+    // Checking the folder counts toward the time limit.
     const startedAt = Date.now();
+    const folder = await chosenFolder(workspaceId, args.folder);
     const current = await snapshot();
     if (
       workspaceId !== null &&
@@ -328,7 +374,7 @@ export function createActions(
       );
     // A new tab leaves every existing pane alone and does not move the
     // desktop view. Never retried: a failure here may still have opened it.
-    const place = await placement(current, workspaceId);
+    const place = await placement(current, workspaceId, folder);
     const { paneId, tabId } = await openTab(place, args.name);
     await waitForShell(paneId);
     const failed = (error: unknown) => {
@@ -387,9 +433,12 @@ export function createActions(
   }
   async function startTerminal(
     workspaceId: string | null,
+    /** Any folder on this computer, instead of a project. */
+    folderInput: string | null = null,
   ): Promise<StartedTerminal> {
     if (workspaceId !== null) target(workspaceId);
-    const place = await placement(await snapshot(), workspaceId);
+    const folder = await chosenFolder(workspaceId, folderInput);
+    const place = await placement(await snapshot(), workspaceId, folder);
     const { paneId, tabId } = await openTab(place, 'terminal');
     // Read-only: the app types the first command itself, only when ready.
     const ready = (await waitForShell(paneId)) === true;

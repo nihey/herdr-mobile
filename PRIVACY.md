@@ -1,6 +1,6 @@
 # Herd Remote privacy policy
 
-Effective November 4, 2026.
+Effective November 9, 2026.
 
 Herd Remote is an unofficial Android companion for [Herdr](https://github.com/herdrdev/herdr). It is not affiliated with the Herdr project. Its source is published at <https://github.com/nihey/herdr-mobile>.
 
@@ -17,7 +17,7 @@ Removing a machine in the app deletes its saved entry. Uninstalling the app, or 
 
 ## Data sent over the network
 
-The app sends requests only to the bridge addresses that you enter or pick. The recommended setup is your private Tailscale network. These requests carry the pairing token, the prompts, keys and text that you send, the sessions and terminals that you start (project or home folder, agent kind and name), the commands that you run in terminals, and the agent status and terminal output that your computer returns. When you open device discovery, they also return the names and private addresses of the devices on your tailnet. This data moves between your phone and your own computer. It is not sent to the developer or to any other party, except what you choose to send to Hermes's model provider (see Hermes).
+The app sends requests only to the bridge addresses that you enter or pick. The recommended setup is your private Tailscale network. These requests carry the pairing token, the prompts, keys and text that you send, the sessions and terminals that you start (project, home or other folder, agent kind and name), the commands that you run in terminals, and the agent status and terminal output that your computer returns. When you open device discovery, they also return the names and private addresses of the devices on your tailnet. When you browse folders for a new session, they return the names of the folders on your computer that you open, never files or their contents; the app keeps them only while the folder list is open. This data moves between your phone and your own computer. It is not sent to the developer or to any other party, except what you choose to send to Hermes's model provider (see Hermes).
 
 ## Home screen widget
 
